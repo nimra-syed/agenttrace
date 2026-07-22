@@ -1,0 +1,151 @@
+// AgentTrace data model.
+// See docs/adr/0003-trace-span-data-model.md for the reasoning behind
+// field choices, ID strategy, and indexes.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  MEMBER
+}
+
+enum TraceStatus {
+  RUNNING
+  SUCCESS
+  ERROR
+}
+
+enum SpanType {
+  LLM
+  TOOL
+  RETRIEVAL
+  CUSTOM
+}
+
+enum SpanStatus {
+  RUNNING
+  SUCCESS
+  ERROR
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  memberships Membership[]
+  projects    Project[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+
+  memberships Membership[]
+}
+
+model Membership {
+  id        String   @id @default(uuid())
+  orgId     String
+  userId    String
+  role      Role
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([orgId, userId])
+}
+
+model Project {
+  id        String   @id @default(uuid())
+  orgId     String
+  name      String
+  slug      String
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id])
+  apiKeys      ApiKey[]
+  traces       Trace[]
+
+  @@unique([orgId, slug])
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  projectId  String
+  name       String
+  keyPrefix  String
+  keyHash    String    @unique
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+}
+
+model Trace {
+  id             String      @id @default(uuid())
+  projectId      String
+  idempotencyKey String?
+  name           String
+  agentName      String
+  status         TraceStatus @default(RUNNING)
+  input          Json?
+  output         Json?
+  error          String?
+  startedAt      DateTime
+  endedAt        DateTime?
+  durationMs     Int?
+  totalTokens    Int?
+  totalCostUsd   Decimal?    @db.Decimal(10, 6)
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+  spans   Span[]
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, startedAt(sort: Desc)])
+  @@index([projectId, status])
+}
+
+model Span {
+  id               String     @id @default(uuid())
+  traceId          String
+  parentSpanId     String?
+  name             String
+  type             SpanType
+  status           SpanStatus @default(RUNNING)
+  input            Json?
+  output           Json?
+  model            String?
+  provider         String?
+  promptTokens     Int?
+  completionTokens Int?
+  costUsd          Decimal?   @db.Decimal(10, 6)
+  error            String?
+  startedAt        DateTime
+  endedAt          DateTime?
+  durationMs       Int?
+  metadata         Json?
+  createdAt        DateTime   @default(now())
+
+  trace Trace @relation(fields: [traceId], references: [id])
+
+  @@index([traceId])
+}

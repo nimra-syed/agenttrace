@@ -33,9 +33,13 @@ infra/
 ```
 
 Data model: `Organization` → `Membership` (role) → `User`; `Organization` →
-`Project` → `Trace` → `Span` (self-referencing `parent_span_id` tree, same
-shape as OpenTelemetry trace/span). See ADR-0005 (written at M1) for full
-schema and index reasoning.
+`Project` → `Trace` → `Span` (self-referencing `parentSpanId` tree, same
+shape as OpenTelemetry trace/span). Schema lives at
+`apps/api/prisma/schema.prisma`; see ADR-0003 for field/index reasoning
+and ADR-0004 for why Prisma (not Drizzle). Prisma Client is generated to
+`apps/api/generated/prisma` (gitignored, regenerate with
+`pnpm --filter api prisma:generate`) and constructed with an explicit
+`@prisma/adapter-pg` driver adapter — see `apps/api/src/prisma/prisma.service.ts`.
 
 ## Repository conventions
 
@@ -61,6 +65,9 @@ pnpm typecheck             # typecheck all packages
 pnpm build                  # build all packages
 pnpm db:up                   # start local Postgres via docker compose
 pnpm db:down                   # stop local Postgres
+pnpm db:migrate                # run/create a Prisma migration (apps/api)
+pnpm db:seed                     # seed demo org/user/project (apps/api)
+pnpm db:studio                     # open Prisma Studio GUI (apps/api)
 ```
 
 Local Postgres (once `pnpm db:up` is running):
@@ -88,8 +95,9 @@ where they're cheap (e.g., auth guard unit tests at M3).
 
 ## Current milestone
 
-M0 complete. Next: M1 — Prisma schema & migrations for the trace/span data
-model, connected to the local Postgres from `pnpm db:up`.
+M1 complete. Next: M2 — auth (signup/login, sessions) and org/project
+creation, built on top of the `User`/`Organization`/`Membership` tables
+from M1.
 
 ## Known technical debt
 
@@ -97,3 +105,13 @@ model, connected to the local Postgres from `pnpm db:up`.
   machine has a pre-existing native PostgreSQL 15 install bound to 5432.
   Not a problem for this project, but anyone cloning this repo on a clean
   machine could safely change it back to 5432 if they want.
+- This project uses Prisma 7, which changed several conventions from
+  older Prisma versions — don't assume older tutorials/muscle memory
+  apply. Specifically: the datasource URL lives in `prisma.config.ts`, not
+  `schema.prisma`; `PrismaClient` requires an explicit driver adapter
+  (`@prisma/adapter-pg`); the generator is set to `moduleFormat = "cjs"`
+  to avoid an ESM-only (`import.meta.url`) default that breaks under
+  CommonJS tooling; and standalone scripts against the generated client
+  (e.g. `prisma/seed.ts`) run via `tsx`, not `ts-node`, because `ts-node`'s
+  CommonJS mode can't resolve the `.js`-extension imports the generated
+  client uses internally. See ADR-0004 for the full story.
