@@ -32,14 +32,21 @@ infra/
   docker/               docker-compose.yml (local Postgres, later Redis)
 ```
 
-Data model: `Organization` → `Membership` (role) → `User`; `Organization` →
-`Project` → `Trace` → `Span` (self-referencing `parentSpanId` tree, same
-shape as OpenTelemetry trace/span). Schema lives at
-`apps/api/prisma/schema.prisma`; see ADR-0003 for field/index reasoning
-and ADR-0004 for why Prisma (not Drizzle). Prisma Client is generated to
-`apps/api/generated/prisma` (gitignored, regenerate with
-`pnpm --filter api prisma:generate`) and constructed with an explicit
-`@prisma/adapter-pg` driver adapter — see `apps/api/src/prisma/prisma.service.ts`.
+Data model: an `Organization` has `Membership` rows (with a role) linking
+it to `User`s, and has `Project`s, which have `Trace`s, which have `Span`s
+(self-referencing `parentSpanId` tree, same shape as OpenTelemetry
+trace/span). Schema lives at `apps/api/prisma/schema.prisma`, see
+ADR-0003 for field/index reasoning and ADR-0004 for why Prisma (not
+Drizzle). Prisma Client is generated to `apps/api/generated/prisma`
+(gitignored, regenerate with `pnpm --filter api prisma:generate`) and
+constructed with an explicit `@prisma/adapter-pg` driver adapter, see
+`apps/api/src/prisma/prisma.service.ts`.
+
+Auth is a hand-rolled, database-backed session system (not JWT, not
+Passport), see ADR-0005. A `SessionGuard` is registered globally, so every
+new route is protected by default unless marked with `@Public()`. Each
+user has exactly one organization for now, created automatically at
+signup, see ADR-0006.
 
 ## Repository conventions
 
@@ -81,8 +88,11 @@ with it.)
 
 Unit tests (Jest, both apps), API integration tests (NestJS + Postgres),
 Playwright end-to-end tests once the dashboard has real flows to test.
-Introduced starting M11; individual milestones may add narrow tests earlier
-where they're cheap (e.g., auth guard unit tests at M3).
+Full integration/e2e test infrastructure (a real test database in CI) is
+still planned for M11, but security-sensitive logic gets unit tests as
+soon as it exists, not deferred until M11. `AuthService` (signup/login)
+already has unit tests as of M2, using a mocked `PrismaService`, no test
+database needed for these.
 
 ## Security rules
 
@@ -90,14 +100,21 @@ where they're cheap (e.g., auth guard unit tests at M3).
   required variables without values.
 - API keys are stored hashed, never in plaintext; shown once at creation.
 - Passwords hashed with bcrypt, never logged.
+- Session tokens are hashed (SHA-256) before being stored, same as API
+  keys. The raw token only ever lives in the browser's httpOnly cookie.
+- Login failures for a wrong password and for an unknown email return the
+  exact same error, so a login attempt never reveals whether an email is
+  registered.
 - Authorization checks (project/org scoping) are tested explicitly, not
   just covered incidentally by happy-path tests.
+- No CSRF token library and no login rate limiting yet, both noted as
+  known gaps in ADR-0005, not oversights.
 
 ## Current milestone
 
-M1 complete. Next: M2 — auth (signup/login, sessions) and org/project
-creation, built on top of the `User`/`Organization`/`Membership` tables
-from M1.
+M2 complete. Next: M3 — API key creation and revocation, scoped to a
+project, so the reference agent (M6) and other clients can authenticate
+without a browser session.
 
 ## Known technical debt
 
@@ -115,3 +132,6 @@ from M1.
   (e.g. `prisma/seed.ts`) run via `tsx`, not `ts-node`, because `ts-node`'s
   CommonJS mode can't resolve the `.js`-extension imports the generated
   client uses internally. See ADR-0004 for the full story.
+- Jest hits the same `.js`-extension resolution problem as `ts-node` did.
+  Fixed with a `moduleNameMapper` entry in `apps/api/package.json`'s jest
+  config that strips `.js` from relative imports before resolving them.

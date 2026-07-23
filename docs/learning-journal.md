@@ -1,5 +1,105 @@
 # Learning Journal
 
+## M2 — Auth, sessions, and org/project creation (2026-07-23)
+
+### What I built
+
+- Signup and login with email and password, using bcrypt to hash
+  passwords.
+- A `Session` table and a session cookie system. When you log in, the
+  server makes a random token, stores only its hash in the database, and
+  sends the raw token to the browser as an httpOnly cookie.
+- A `SessionGuard` that checks this cookie on every request, applied
+  globally, with a `@Public()` decorator for the few routes that should
+  skip it (signup, login, health check).
+- Endpoints to create and list projects, scoped to the signed in user's
+  organization.
+- Unit tests for the signup and login logic, using a mocked database so
+  no test database was needed yet.
+
+### What I learned
+
+- The difference between authentication (who are you) and authorization
+  (what are you allowed to do). This milestone builds authentication and
+  a very simple form of authorization (are you a member of this
+  organization).
+- Why hashing a session token before storing it matters, not just
+  hashing passwords. If the database ever leaked, an attacker with only
+  the hashes still could not log in as anyone, since they do not have the
+  original random tokens.
+- httpOnly cookies keep a token away from client side JavaScript. This
+  matters because it means an XSS bug somewhere else in a future
+  frontend could not just read the cookie and steal a session.
+- Why a login should give the exact same error for "wrong password" and
+  "no such user." If the errors were different, an attacker could use
+  login attempts to figure out which emails have accounts, one at a time.
+- Nest's guards can be applied globally, and turned off per route with a
+  decorator, instead of being added one at a time to every protected
+  route. This means new routes are protected by default, which is safer,
+  since it is easy to forget to add a guard to a new route but much
+  harder to forget to remove `@Public()` from a route that should not
+  have it.
+- Database transactions matter for signup, since it creates three rows
+  (organization, user, membership) that all need to succeed together or
+  not at all. If the membership creation failed after the user was
+  already created, we would have a user with no organization, stuck.
+
+### Decisions made
+
+- ADR-0005: session based auth with hashed tokens, no Passport, guard
+  defaults to deny.
+- ADR-0006: create an organization automatically at signup, one
+  organization per user for now.
+
+### Problems encountered and how we resolved them
+
+- The same `.js` extension import problem from M1 showed up again, this
+  time in Jest. `ts-jest` could not resolve `../../generated/prisma/client.js`
+  because only the `.ts` file exists on disk. Fixed by adding a
+  `moduleNameMapper` rule to the Jest config that strips `.js` from
+  relative imports before Jest tries to resolve them. This is a known,
+  documented workaround for `ts-jest` plus `nodenext` style TypeScript
+  projects, not something specific to our setup.
+- Once the session guard was registered globally, the existing `/` and
+  `/health` routes from M0 and M1 started requiring a login too, since
+  they were not marked public. Had to explicitly add `@Public()` to both.
+  A good reminder that a global guard change can quietly break existing
+  routes if you are not careful to check all of them.
+
+### Interview questions I should be able to answer
+
+- What is the actual difference between a session and a JWT, and when
+  would you pick one over the other?
+- Why hash a session token before storing it, if the cookie is already
+  httpOnly?
+- Why does a login endpoint give the same error for a wrong password and
+  an email that does not exist?
+- What is a database transaction protecting against in the signup flow,
+  specifically?
+- Why register an auth guard globally instead of adding it to each
+  protected route one at a time?
+
+### Common mistakes engineers make here
+
+- Giving different error messages for "wrong password" versus "no such
+  account," which leaks which emails are registered.
+- Storing a raw, usable session token in the database instead of a hash
+  of it.
+- Adding a new protected route and forgetting to add the auth check to
+  it, because the project relies on each route remembering to add its
+  own guard instead of defaulting to protected.
+- Skipping a database transaction on a multi step signup, leaving room
+  for a user to end up half created if one step fails.
+
+### How this milestone improves my resume
+
+"Built a session based authentication system from scratch (hashed
+tokens, httpOnly cookies, a globally applied guard with explicit public
+route opt outs) and a multi tenant project creation flow with tested
+authorization boundaries" is a real, specific line. It shows an
+understanding of how login actually works, not just "used a login
+library."
+
 ## M1 — Prisma schema, migrations, and a live Postgres connection (2026-07-22)
 
 ### What I built

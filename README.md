@@ -4,8 +4,8 @@ Observability and evaluation platform for AI agents — records an agent's
 LLM calls, tool calls, latency, token usage, cost, and errors as
 traces/spans, and presents them in a web dashboard.
 
-Status: early development (M1 — Prisma schema, migrations, Postgres
-connected). See
+Status: early development (M2, auth, sessions, and org/project creation
+done). See
 [`CLAUDE.md`](./CLAUDE.md) for architecture and conventions, and
 [`docs/adr/`](./docs/adr) for the reasoning behind major decisions.
 
@@ -34,8 +34,24 @@ pnpm db:up            # local Postgres (docker compose, host port 5433)
 cp apps/api/.env.example apps/api/.env   # already present in this repo's dev setup
 pnpm db:migrate       # apply Prisma migrations
 pnpm db:seed          # demo org/user/project
-pnpm dev:api          # NestJS API — http://localhost:3000 (try GET /health)
-pnpm dev:web          # Next.js dashboard — http://localhost:3000 (or next free port)
+pnpm dev:api          # NestJS API, http://localhost:3000 (try GET /health)
+pnpm dev:web          # Next.js dashboard, http://localhost:3000 (or next free port)
+```
+
+## Trying auth locally
+
+```bash
+curl -c cookies.txt -X POST localhost:3000/auth/signup \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"a long password","name":"Your Name","orgName":"Your Org"}'
+
+curl -b cookies.txt localhost:3000/auth/me
+
+curl -b cookies.txt -X POST localhost:3000/projects \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"My Agent"}'
+
+curl -b cookies.txt localhost:3000/projects
 ```
 
 ## Commands
