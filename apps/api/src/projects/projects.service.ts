@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { slugify } from '../common/slugify';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -18,6 +18,20 @@ export class ProjectsService {
       where: { orgId },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  // Used everywhere a request claims to act on a project it does not
+  // necessarily own. Returns 404 (not 403) for a project that exists but
+  // belongs to a different org, so the response never confirms the
+  // project's existence to a caller who has no access to it.
+  async findOwnedProject(orgId: string, projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    });
+    if (!project || project.orgId !== orgId) {
+      throw new NotFoundException('Project not found');
+    }
+    return project;
   }
 
   private async uniqueSlug(orgId: string, name: string): Promise<string> {

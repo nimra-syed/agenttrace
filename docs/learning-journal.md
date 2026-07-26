@@ -1,5 +1,119 @@
 # Learning Journal
 
+## M3 — API keys, create and revoke (2026-07-24)
+
+### What I built
+
+- Endpoints for a signed in user to create, list, and revoke API keys for
+  a project.
+- A new `ApiKeyGuard`, separate from the session guard from M2, that
+  reads an `Authorization: Bearer <key>` header and resolves it to a
+  project instead of a person.
+- A temporary `GET /api-keys/verify` endpoint to prove the guard works
+  with a real HTTP request, since there was no other API-key-protected
+  endpoint yet to test it against.
+- Moved the `hashToken` helper out of the auth folder into a shared
+  common folder, since both sessions and API keys need it now, not just
+  auth.
+
+### What I learned
+
+- A session answers "which person," an API key answers "which project."
+  They needed two different guards, not one guard trying to handle both
+  cases, since what gets attached to the request afterward
+  (`request.user` versus `request.apiKeyContext`) is a genuinely
+  different shape.
+- Giving every failure case the same error message is a real security
+  choice, not just tidiness. If "missing key," "unknown key," and
+  "revoked key" each had their own message, an attacker probing an
+  endpoint could learn something from which message came back. I wrote a
+  test specifically checking that all rejection cases produce the exact
+  same message, not just that they all return 401.
+- An authorization check can have more than one part. Revoking a key
+  needed two separate checks: does this project belong to my
+  organization, and does this key belong to this project. Skipping
+  either one on its own would open a real gap, even though each check
+  looks like it is doing the same kind of thing.
+- Returning `404` instead of `403` for a project you cannot access, a
+  pattern from M2, applies here too. It came up again naturally instead
+  of needing to be reinvented, which was a good sign that the pattern
+  actually generalizes.
+- A guard can be applied per route with `@UseGuards(...)` instead of
+  globally. `SessionGuard` from M2 is global because most routes are for
+  a logged in person. `ApiKeyGuard` is not global, because only a few
+  routes are meant to be called by a script holding a key.
+
+### Decisions made
+
+- ADR-0007: API key format, hashed storage, one generic 401 for every
+  failure case, and `/api-keys/verify` marked explicitly as temporary.
+
+### Problems encountered and how we resolved them
+
+- No schema or tooling problems this milestone. The `ApiKey` table
+  already existed from M1's schema, and the hashing and guard patterns
+  from M2 carried over directly, so most of this was applying an
+  established pattern rather than solving something new.
+- The pre-commit review did catch two real issues in the first version
+  of the code, both worth remembering:
+  - I had `ApiKeyGuard` update `lastUsedAt` on every successful
+    authentication. It worked, but it meant every future ingestion
+    request (M4, the busiest path in the whole system) would carry an
+    extra database write just to track a field that is only useful
+    occasionally. Removed for now, revisit with a throttled or async
+    update once ingestion exists.
+  - `revoke()` did not check whether a key was already revoked. Calling
+    it twice would silently overwrite the original `revokedAt`
+    timestamp with a new one, which quietly defeats the audit reasoning
+    for soft-deleting instead of hard-deleting in the first place. Fixed
+    by making revoke idempotent: if already revoked, return success
+    without touching the row.
+  - Neither issue would have failed a test or a build. Both were only
+    caught by specifically asking "what happens on every request" and
+    "what happens if this is called twice," not by anything automated.
+
+### Interview questions I should be able to answer
+
+- Why does an API key need a different guard than a session, instead of
+  reusing the same one?
+- Why is giving every auth failure the same error message a security
+  decision and not just a style choice?
+- What are the two separate checks involved in revoking an API key, and
+  what would go wrong if only one of them existed?
+- Why store a short prefix of an API key separately from its hash?
+- Why mark `/api-keys/verify` as temporary instead of just building it
+  and moving on?
+- Why does writing `lastUsedAt` on every authenticated request matter
+  more for an ingestion endpoint than for a login endpoint?
+- What goes wrong if an action like "revoke" is not idempotent, and how
+  would you notice, since it would not show up as a failing test?
+
+### Common mistakes engineers make here
+
+- Giving different error messages for different auth failure reasons,
+  which leaks information to whoever is probing the endpoint.
+- Checking that a project belongs to the right organization, but
+  forgetting to also check that the specific resource being modified
+  (an API key here) actually belongs to that project.
+- Adding a write to a hot path (a field update on every authenticated
+  request) without asking how often that path will actually run once a
+  real client is calling it many times a second.
+- Writing an action like "revoke" or "delete" as if it will only ever be
+  called once, so a retried or duplicate call silently does something
+  slightly wrong (like overwriting a timestamp) instead of safely doing
+  nothing.
+- Building a debug or test endpoint and never revisiting whether it
+  should still exist once the real endpoint it was standing in for
+  finally gets built.
+
+### How this milestone improves my resume
+
+"Designed and implemented an API key system (hashed storage, prefix
+based identification, a dedicated auth guard, and a tested single-message
+failure response) as a second authentication path alongside session
+based login" shows the ability to support more than one kind of client
+(browser and machine) in the same system, a common real world need.
+
 ## M2 — Auth, sessions, and org/project creation (2026-07-23)
 
 ### What I built

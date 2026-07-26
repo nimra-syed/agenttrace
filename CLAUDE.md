@@ -48,6 +48,14 @@ new route is protected by default unless marked with `@Public()`. Each
 user has exactly one organization for now, created automatically at
 signup, see ADR-0006.
 
+Non-browser clients (scripts, agents, SDKs) authenticate with an API key
+instead of a session, see ADR-0007. `hashToken` (used by both sessions
+and API keys) lives in `apps/api/src/common/hash-token.util.ts`, shared
+on purpose since it is not specific to either feature. `ApiKeyGuard` is
+applied per route with `@UseGuards(ApiKeyGuard)`, alongside `@Public()`
+to skip the session guard, it is not global like `SessionGuard`, since
+most routes are for a logged in person, not a key holder.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -109,12 +117,18 @@ database needed for these.
   just covered incidentally by happy-path tests.
 - No CSRF token library and no login rate limiting yet, both noted as
   known gaps in ADR-0005, not oversights.
+- `ApiKeyGuard` returns the exact same `401 Invalid API key` for a
+  missing header, a malformed header, an unknown key, and a revoked key.
+  This is tested directly (`api-key.guard.spec.ts`), do not change one of
+  these messages without changing all of them.
+- Random tokens (sessions and API keys) always use `crypto.randomBytes`,
+  never `Math.random()`.
 
 ## Current milestone
 
-M2 complete. Next: M3 — API key creation and revocation, scoped to a
-project, so the reference agent (M6) and other clients can authenticate
-without a browser session.
+M3 complete. Next: M4 — trace ingestion API, the first real endpoint
+that `ApiKeyGuard` protects, and the first place `GET /api-keys/verify`
+gets a real answer to the "should this stay" question from ADR-0007.
 
 ## Known technical debt
 
@@ -135,3 +149,7 @@ without a browser session.
 - Jest hits the same `.js`-extension resolution problem as `ts-node` did.
   Fixed with a `moduleNameMapper` entry in `apps/api/package.json`'s jest
   config that strips `.js` from relative imports before resolving them.
+- `GET /api-keys/verify` is a temporary diagnostic endpoint, added only
+  to prove `ApiKeyGuard` works before M4 gives us a real endpoint to test
+  it against. Decide at M4 whether to remove it, gate it, or keep it on
+  purpose. See ADR-0007.

@@ -5,15 +5,12 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { Role } from '../../generated/prisma/client.js';
+import { hashToken } from '../common/hash-token.util';
 import { slugify } from '../common/slugify';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
-import {
-  SESSION_DURATION_MS,
-  generateSessionToken,
-  hashToken,
-} from './token.util';
+import { SESSION_DURATION_MS, generateSessionToken } from './token.util';
 
 const BCRYPT_SALT_ROUNDS = 10;
 

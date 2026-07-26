@@ -6,10 +6,11 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
+import { hashToken } from '../common/hash-token.util';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from './current-user.decorator';
 import { IS_PUBLIC_KEY } from './public.decorator';
-import { SESSION_COOKIE_NAME, hashToken } from './token.util';
+import { SESSION_COOKIE_NAME } from './token.util';
 
 @Injectable()
 export class SessionGuard implements CanActivate {

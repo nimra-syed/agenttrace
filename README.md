@@ -4,8 +4,7 @@ Observability and evaluation platform for AI agents — records an agent's
 LLM calls, tool calls, latency, token usage, cost, and errors as
 traces/spans, and presents them in a web dashboard.
 
-Status: early development (M2, auth, sessions, and org/project creation
-done). See
+Status: early development (M3, API key create and revoke done). See
 [`CLAUDE.md`](./CLAUDE.md) for architecture and conventions, and
 [`docs/adr/`](./docs/adr) for the reasoning behind major decisions.
 
@@ -52,6 +51,21 @@ curl -b cookies.txt -X POST localhost:3000/projects \
   -d '{"name":"My Agent"}'
 
 curl -b cookies.txt localhost:3000/projects
+```
+
+## Trying API keys locally
+
+```bash
+# using the project id from above
+curl -b cookies.txt -X POST localhost:3000/projects/<projectId>/api-keys \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"local dev"}'
+# save the "key" from the response, it is only shown once
+
+curl -H "Authorization: Bearer <key>" localhost:3000/api-keys/verify
+
+curl -b cookies.txt -X DELETE localhost:3000/projects/<projectId>/api-keys/<keyId>
+curl -H "Authorization: Bearer <key>" localhost:3000/api-keys/verify   # now fails
 ```
 
 ## Commands
