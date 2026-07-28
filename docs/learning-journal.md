@@ -1,5 +1,140 @@
 # Learning Journal
 
+## M6 — Reference AI agent (2026-07-28)
+
+### What I built
+
+- `apps/reference-agent`: a GitHub issue investigator with three steps
+  under one trace, fetch the issue, fetch the README, ask Gemini for a
+  root cause and a proposed resolution, instrumented with the SDK from
+  M5.
+- Unauthenticated, read-only GitHub access (no personal access token),
+  and a small per-model cost-estimation table for the LLM call.
+- The first real, end-to-end run of the whole system: auth, projects,
+  API keys, ingestion, and the SDK, all exercised by something other
+  than us testing each piece by hand.
+
+### What I learned
+
+- A model I expected to work (`gemini-2.5-flash`, based on training
+  knowledge) returned `404 "no longer available to new users"` for a
+  freshly created API key. Training knowledge about which models are
+  currently available is not something to trust without checking; a
+  direct REST call against the provider's API is the actual source of
+  truth, and I should reach for that first, not after something fails.
+- A `429` response is not always a transient "you're going too fast"
+  signal. This one's structured detail explicitly scoped every violated
+  metric to `FreeTier` and stated `limit: 0`, meaning zero allocation,
+  not "quota used up for now." The response's own `retryDelay` hint
+  doesn't mean retrying will help, that field is boilerplate attached to
+  most `RESOURCE_EXHAUSTED` responses regardless of whether the
+  underlying limit is temporary or structural. Reading the actual
+  structured error, not just the HTTP status code, was what caught this.
+- A model outside what I recognized from training (`gemini-3-flash-preview`)
+  turned out to be the one that actually worked, no billing required.
+  Provider APIs release new models continuously, and any AI assistant's
+  own knowledge has a cutoff, so unfamiliar model names showing up in a
+  real API response are expected, not a sign something is wrong. The
+  honest response to a knowledge gap like that is to test directly
+  against the real API, not to guess based on naming patterns or assume
+  the newest-looking name is right.
+- Newer models can bill for things that aren't in the visible response.
+  Gemini 3's `usageMetadata.thoughtsTokenCount` (internal "thinking"
+  tokens) is real, documented, and billed as output, but it's a
+  separate field from `candidatesTokenCount`, the token count for the
+  actual visible text. Missing this would have meant every cost
+  estimate and every recorded completion-token count for this model was
+  silently wrong, not obviously wrong, just quietly too low. Confirmed
+  by actually inspecting a real response's JSON, not by trusting the
+  first field name that looked plausible.
+- I temporarily displayed a live, working API key in plain terminal
+  output while helping set up local testing. It was caught immediately
+  in review before anything happened, but the right response to a
+  credential ever entering visible output, even in a local dev
+  test, even for a "local-only" project, is to revoke and replace it,
+  not to just be more careful next time. This is the same discipline
+  used for the platform's own API keys in earlier milestones, now
+  applied to a key it wasn't AgentTrace's own guard checking.
+- I wrote "verified directly" in a design document to describe a test
+  that had not actually been run yet. This is a stronger version of a
+  mistake I already knew to avoid: not just "don't claim something works
+  without checking," but "don't even write it down as done in a document
+  meant to be a record," since a document is exactly the kind of place a
+  false claim quietly outlives the conversation it was made in.
+
+### Decisions made
+
+- ADR-0010: the three-step flat trace design, unauthenticated read-only
+  GitHub access, Gemini as the chosen provider with a live-tested
+  default model, per-model (not per-provider) cost estimation with no
+  guessed prices for unverified models, and the real findings from
+  testing model availability and quota against a real API key.
+
+### Problems encountered and how we resolved them
+
+- Covered in detail above: `gemini-2.5-flash` and `gemini-2.5-flash-lite`
+  both 404'd for a new API key, `gemini-2.0-flash-001` hit a hard `0`
+  free-tier quota, `gemini-3-flash-preview` worked. Resolved by testing
+  each candidate directly via `curl` against Gemini's REST API before
+  changing any of our own code, so each finding was based on a real
+  response, not a guess, before it got written into `llm.ts`.
+- `thoughtsTokenCount` was not accounted for in the first version of
+  `analyzeIssue`. Caught by inspecting a real, successful response's
+  full JSON rather than only checking that the call succeeded. Fixed by
+  folding it into `completionTokens`, with a comment explaining why,
+  rather than silently dropping it.
+- An API key appeared in plain terminal output during setup. Resolved by
+  revoking it immediately and generating a replacement, confirming the
+  new one never appeared in any command's output, and confirming (via
+  `git log --all` and `git check-ignore`) that `.env` itself had never
+  entered git history at any point.
+
+### Interview questions I should be able to answer
+
+- Why does this agent only ever have read-only access to GitHub, and how
+  is that enforced (a policy, or a structural limitation)?
+- What's the actual difference between a `429` meaning "slow down" and a
+  `429` meaning "this will never succeed no matter how long you wait,"
+  and how do you tell them apart from the response body?
+- Why did `completionTokens` need to include Gemini's `thoughtsTokenCount`
+  field, and what would have gone wrong silently if it hadn't?
+- Why does the reference agent never run in CI, when the API and SDK's
+  tests do?
+- What's the difference between the SDK's fail-open behavior (ADR-0009)
+  and a real failure in the agent's own logic (a bad issue number, a
+  failed LLM call), and why do they need to be handled differently?
+
+### Common mistakes engineers make here
+
+- Trusting a model name or provider detail from memory or training data
+  instead of checking the provider's current API directly, especially
+  for anything that changes over time (model availability, pricing,
+  deprecations).
+- Treating every `429` the same way (assume retry-after-a-delay will
+  work) instead of reading the actual quota details in the response
+  body, which can say "this will never succeed as configured," not just
+  "not right now."
+- Recording only the most obvious usage field from an API response
+  (visible completion tokens) and missing a less obvious one (thinking
+  tokens) that's still real and still billed.
+- Letting a secret appear in any command output "just this once" because
+  it's local-only or "nobody's watching," instead of treating every
+  appearance the same way as a real leak.
+- Writing a result into a design document before actually producing that
+  result, planning to "fix it later" once the real test runs, which
+  quietly turns an intended-but-unverified claim into a permanent,
+  false one if that follow-up step gets skipped.
+
+### How this milestone improves my resume
+
+"Built and instrumented a reference AI agent (GitHub issue investigation,
+unauthenticated read-only tool access, LLM cost estimation with
+per-model verification) that exercises the full observability platform
+end to end, including diagnosing and resolving a real third-party API
+model deprecation and quota issue during integration" is a specific,
+concrete claim about debugging a real external dependency, not just
+building against documentation that turned out to be accurate.
+
 ## M5 — TypeScript SDK (2026-07-28)
 
 ### What I built

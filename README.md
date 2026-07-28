@@ -4,7 +4,7 @@ Observability and evaluation platform for AI agents — records an agent's
 LLM calls, tool calls, latency, token usage, cost, and errors as
 traces/spans, and presents them in a web dashboard.
 
-Status: early development (M5, TypeScript SDK done). See
+Status: early development (M6, reference AI agent done). See
 [`CLAUDE.md`](./CLAUDE.md) for architecture and conventions, and
 [`docs/adr/`](./docs/adr) for the reasoning behind major decisions.
 
@@ -14,7 +14,7 @@ Status: early development (M5, TypeScript SDK done). See
 apps/
   web/               Next.js dashboard
   api/                NestJS backend
-  reference-agent/    instrumented example agent (added at M6)
+  reference-agent/    GitHub issue investigator (fetch issue, fetch README, ask Gemini)
 packages/
   sdk/                AgentTrace instrumentation client
   shared-types/        shared Trace/Span/DTO types
@@ -107,6 +107,32 @@ await client.trace({ name: 'issue-investigation', agentName: 'github-agent' }, a
 If AgentTrace is unreachable, this still runs your code normally and
 just logs a warning, it never throws from the trace/span reporting
 itself.
+
+## Running the reference agent
+
+A small GitHub issue investigator (fetch issue, fetch README, ask Gemini
+for a root cause and resolution), instrumented with the SDK above. See
+ADR-0010 for the design, including why GitHub access is unauthenticated
+and read-only, and why this never runs in CI (it makes a real, paid LLM
+call).
+
+```bash
+cd apps/reference-agent
+cp .env.example .env
+# fill in AGENTTRACE_API_KEY (see "Trying API keys locally" above) and
+# GEMINI_API_KEY (https://aistudio.google.com/apikey)
+pnpm start vercel/next.js 1
+```
+
+If the default model (`GEMINI_MODEL`, `gemini-3-flash-preview`) ever
+stops working, check current model availability directly against
+Gemini's API before assuming the code is wrong:
+
+```bash
+curl "https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent?key=$GEMINI_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"contents":[{"parts":[{"text":"Say OK"}]}]}'
+```
 
 ## Commands
 

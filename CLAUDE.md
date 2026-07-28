@@ -80,6 +80,21 @@ agent being instrumented. `packages/shared-types` now has real content
 wire-format types with ISO string timestamps, and `apps/api`'s DTOs
 `implements` them as a compile-time (not runtime) drift check.
 
+`apps/reference-agent` is a GitHub issue investigator (fetch issue,
+fetch README, ask Gemini for a root cause/resolution), instrumented with
+the SDK, see ADR-0010. GitHub access is unauthenticated, read-only REST
+calls only, no personal access token. Never run in CI (a real, paid,
+network-dependent LLM call on every push would be a recurring cost and a
+flaky build). `GEMINI_MODEL` is configurable, defaulting to
+`gemini-3-flash-preview` in `llm.ts`, picked after live testing showed
+`gemini-2.5-flash` and `gemini-2.5-flash-lite` return `404` for new API
+keys and `gemini-2.0-flash-001` returns a hard `0` free-tier quota, not
+from documentation alone. Confirmed working end to end (`SUCCESS` and
+`ERROR` traces both verified directly in Postgres, see ADR-0010).
+`pricing.ts` deliberately has no price table entry for
+`gemini-3-flash-preview` (no verified pricing yet), so `costUsd` is
+`undefined` for it rather than guessed.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -161,12 +176,17 @@ database needed for these.
   See ADR-0009.
 - The SDK's error capture excludes stack traces for now, only the
   message is sent. See ADR-0009 for the tradeoff.
+- Locally-generated dev credentials (API keys, session tokens) should
+  never appear in command output/echo, even for local-only testing.
+  When one accidentally does, revoke it and generate a replacement
+  rather than continuing to use it. Write secrets to files directly
+  (e.g. via a script that never prints them) instead of echoing them to
+  a terminal first.
 
 ## Current milestone
 
-M5 complete. Next: M6 — a reference AI agent (a GitHub issue
-investigator) instrumented with the SDK, the first real, end-to-end
-proof that the whole system works together.
+M6 complete. Next: M7 — a dashboard listing agent runs, the first piece
+of the web app (apps/web) with real functionality.
 
 ## Known technical debt
 
@@ -216,3 +236,17 @@ proof that the whole system works together.
   `apps/web` do (inherited from their scaffolding tools). Strict
   TypeScript and Prettier formatting catch a lot in the meantime; add
   ESLint here if the package grows enough to want it.
+- `gemini-3-flash-preview` (the reference agent's default model) has no
+  verified price in `pricing.ts`, since it's a preview model with no
+  publicly confirmed rate at the time this was written. `costUsd` will
+  be `undefined` for it until real pricing is checked and added. Also,
+  as a preview model, it could change behavior or be deprecated with
+  less notice than a stable release; if `GEMINI_MODEL` starts failing,
+  check current model availability the same way M6 did (a direct REST
+  call against `generativelanguage.googleapis.com`), not by assuming
+  the old model name still works.
+- Gemini API keys (as of M6) may return `404 "no longer available to
+  new users"` for some models, or a real `429` with `limit: 0` (not a
+  transient rate limit) on others, depending on the key's project and
+  billing status. A `0` limit does not resolve by waiting; it means no
+  free-tier allocation at all for that model on that project.
