@@ -4,7 +4,7 @@ Observability and evaluation platform for AI agents — records an agent's
 LLM calls, tool calls, latency, token usage, cost, and errors as
 traces/spans, and presents them in a web dashboard.
 
-Status: early development (M4, trace ingestion API done). See
+Status: early development (M5, TypeScript SDK done). See
 [`CLAUDE.md`](./CLAUDE.md) for architecture and conventions, and
 [`docs/adr/`](./docs/adr) for the reasoning behind major decisions.
 
@@ -86,6 +86,27 @@ curl -H "Authorization: Bearer <key>" -X POST localhost:3000/traces \
   -H 'Content-Type: application/json' \
   -d '{"name":"issue-investigation","agentName":"github-agent","status":"SUCCESS","startedAt":"2026-07-27T10:00:00.000Z","endedAt":"2026-07-27T10:00:04.000Z","durationMs":4000,"externalTraceId":"run-1"}'
 ```
+
+## Using the SDK
+
+```ts
+import { AgentTraceClient } from '@agenttrace/sdk';
+
+const client = new AgentTraceClient({ apiKey, baseUrl: 'http://localhost:3000' });
+
+await client.trace({ name: 'issue-investigation', agentName: 'github-agent' }, async (trace) => {
+  return trace.span({ name: 'call-llm', type: 'LLM' }, async (span) => {
+    const response = await callLlm();
+    span.recordUsage({ promptTokens: response.usage.promptTokens, completionTokens: response.usage.completionTokens });
+    span.setOutput(response.text); // output is never captured automatically, see ADR-0009
+    return response.text;
+  });
+});
+```
+
+If AgentTrace is unreachable, this still runs your code normally and
+just logs a warning, it never throws from the trace/span reporting
+itself.
 
 ## Commands
 

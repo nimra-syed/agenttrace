@@ -1,3 +1,4 @@
+import type { CreateSpanPayload } from '@agenttrace/shared-types';
 import {
   IsEnum,
   IsISO8601,
@@ -10,7 +11,9 @@ import {
 } from 'class-validator';
 import { SpanStatus, SpanType } from '../../../generated/prisma/client.js';
 
-export class CreateSpanDto {
+// See CreateTraceDto for why this implements clause exists: a
+// compile-time shape check, not a runtime one.
+export class CreateSpanDto implements CreateSpanPayload {
   // The client's stable identifier for this span, same reasoning as
   // externalTraceId. See ADR-0008.
   @IsOptional()

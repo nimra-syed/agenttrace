@@ -1,5 +1,115 @@
 # Learning Journal
 
+## M5 — TypeScript SDK (2026-07-28)
+
+### What I built
+
+- `AgentTraceClient`, a small SDK wrapping the ingestion API from M4.
+  `client.trace(info, fn)` and `trace.span(info, fn)` wrap a callback,
+  measuring timing and reporting to AgentTrace automatically.
+- Fail-open behavior: any failure in AgentTrace's own reporting (network
+  error, timeout, bad response) is caught and logged as a sanitized
+  warning, never thrown, so a problem with AgentTrace can never break or
+  hang the agent using it.
+- Real content in `packages/shared-types` for the first time since it
+  was scaffolded in M0: wire-format request/response types, with
+  `apps/api`'s DTOs now `implements`-checked against them at compile
+  time.
+
+### What I learned
+
+- "Never break the caller's code" and "never hang the caller's code" are
+  two different guarantees, and I only had the first one until it was
+  pointed out. Fail-open on errors is not enough on its own if a slow
+  response can still delay real work; a bounded timeout is what actually
+  makes fail-open true in practice, not just in the happy path.
+- A callback's return value looks like an obviously convenient thing to
+  auto-capture as "the output," and that convenience is exactly the
+  problem: it means application code choosing what to return silently
+  decides what gets sent to a third system, with no chance to think about
+  whether that value is safe to send.
+- Wall-clock time and monotonic time solve different problems and are
+  not interchangeable. `Date` answers "what time did this happen," useful
+  for a dashboard. `performance.now()` answers "how much time elapsed,"
+  and unlike `Date`, is guaranteed not to jump due to a clock
+  adjustment. Using the wrong one for duration is a subtle, intermittent
+  bug, not something that fails in an obvious way most of the time.
+- A network timeout is genuinely ambiguous: it means "we stopped
+  waiting," not "the server didn't process the request." Code that
+  assumes a timeout means failure, and skips anything that depended on
+  success, can end up in a worse state than code that treats the
+  outcome as unknown and stays self-sufficient regardless. This is why
+  the finish call for a trace or span was designed to never depend on
+  whether the start call actually succeeded.
+- `implements` in TypeScript is a compile-time shape check, nothing
+  about it runs when a real HTTP request comes in. It is still valuable:
+  it turns "the API and the SDK's types silently drifted apart" from a
+  bug someone has to notice into a build failure the moment it happens.
+
+### Decisions made
+
+- ADR-0009: the wrapper API shape, fail-open with a bounded timeout, no
+  automatic output capture, wall-clock vs. monotonic timestamps, the
+  finish-call-is-self-sufficient design, bounded error capture with
+  stack traces excluded, and sanitized warning logging.
+
+### Problems encountered and how we resolved them
+
+- Jest failed to parse the SDK's test files at all
+  (`Cannot use import statement outside a module`) once
+  `packages/sdk/package.json` had `"type": "module"` set. Fixed by
+  removing it, matching `apps/api`'s existing convention of relying on
+  `tsconfig`'s `NodeNext` module resolution without also declaring the
+  package as real ESM, which Jest's default CommonJS-oriented transform
+  does not handle well. Also hit a stale Jest cache while debugging this,
+  `jest --clearCache` was necessary after the fix before it actually took
+  effect, worth remembering before assuming a fix didn't work.
+- A test that mocked the global `Date` constructor
+  (`jest.spyOn(global, 'Date')`) to simulate a wall-clock jump produced
+  objects missing their prototype methods (`toISOString` was not a
+  function). Native constructors are known to be fragile to mock this
+  way. Replaced with a simpler test that only mocks `performance.now()`
+  and lets real, unmocked wall-clock time pass, which proves the same
+  property (duration comes from the monotonic clock) without needing to
+  fight a native constructor mock at all.
+
+### Interview questions I should be able to answer
+
+- Why does "fail open" require a timeout, not just a try/catch around
+  the network call?
+- Why should an SDK never automatically send a wrapped function's return
+  value to a third-party system?
+- What is the actual difference between wall-clock time and monotonic
+  time, and why does duration specifically need the monotonic one?
+- Why is a network timeout an ambiguous outcome, and how did that shape
+  the design of the "finish" call?
+- What does `implements` actually check in TypeScript, and what does it
+  not check?
+
+### Common mistakes engineers make here
+
+- Adding a try/catch around a network call and calling it "fail open,"
+  without a timeout, so a hanging request still blocks or delays the
+  caller even though it will eventually resolve to a caught error.
+- Auto-capturing a function's return value for logging or telemetry
+  without considering that the function's caller never opted into that
+  data leaving the process.
+- Using `Date.now()` (or two `Date` objects) to measure elapsed time
+  instead of a monotonic clock, which works almost all the time and
+  fails intermittently in a way that's hard to reproduce.
+- Assuming a network timeout means the request definitely failed
+  server-side, when it only means the client gave up waiting.
+
+### How this milestone improves my resume
+
+"Designed a fail-open TypeScript SDK (bounded timeouts, explicit opt-in
+output capture, monotonic duration measurement, and a self-sufficient
+upsert-based reporting protocol) for instrumenting third-party
+application code without risking that code's correctness or
+availability" is a specific, real claim about building a library other
+people's code depends on, a different skill than building an API only
+your own frontend calls.
+
 ## M4 — Trace ingestion API (2026-07-27)
 
 ### What I built

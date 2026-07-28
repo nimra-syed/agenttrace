@@ -67,6 +67,19 @@ explicit `null` clears it, this relies on real Prisma behavior
 built ourselves. `parentSpanId` requires parent-first ingestion (the
 parent must already exist), a real limitation, see ADR-0008.
 
+`packages/sdk` (`AgentTraceClient`) wraps the ingestion API for
+non-browser callers, see ADR-0009. `client.trace(info, fn)` and
+`trace.span(info, fn)` measure timing and manage the external-id upsert
+pattern automatically; a wrapped function's return value is never sent
+as output automatically (`setOutput` is explicit, on purpose). Every
+outbound call fails open (a bounded, `AbortController`-based timeout,
+warnings that can only ever describe the failure kind, never its
+content) so a problem with AgentTrace itself can never break or hang the
+agent being instrumented. `packages/shared-types` now has real content
+(`CreateTracePayload`, `CreateSpanPayload`, `TraceRecord`, `SpanRecord`),
+wire-format types with ISO string timestamps, and `apps/api`'s DTOs
+`implements` them as a compile-time (not runtime) drift check.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -141,12 +154,19 @@ database needed for these.
 - `lastUsedAt` on an API key updates after successful authentication, not
   after the request that follows also succeeds, and is throttled to at
   most once per hour per key. See ADR-0008.
+- The SDK never auto-captures a wrapped function's return value as
+  output, and never `JSON.stringify`s an arbitrary thrown value for
+  error reporting, both for the same reason: application data can
+  contain secrets, private data, circular references, or be very large.
+  See ADR-0009.
+- The SDK's error capture excludes stack traces for now, only the
+  message is sent. See ADR-0009 for the tradeoff.
 
 ## Current milestone
 
-M4 complete. Next: M5 — a lightweight TypeScript SDK wrapping the
-ingestion API, so instrumenting an agent means calling a few SDK
-functions instead of constructing raw HTTP requests by hand.
+M5 complete. Next: M6 — a reference AI agent (a GitHub issue
+investigator) instrumented with the SDK, the first real, end-to-end
+proof that the whole system works together.
 
 ## Known technical debt
 
@@ -185,3 +205,14 @@ functions instead of constructing raw HTTP requests by hand.
   --create-only` under `expect` (auto-answering the confirmation prompt)
   to generate the migration file, inspect it, then apply it
   non-interactively with `prisma migrate deploy`.
+- `packages/sdk` and `packages/shared-types` do not set
+  `"type": "module"` in `package.json`, even though `tsconfig.base.json`
+  uses `"module": "NodeNext"`. Jest's default configuration expects
+  CommonJS-shaped output from its transformer; a real ESM package type
+  conflicts with that. Matches `apps/api`'s own convention. If a stale
+  Jest cache is suspected after a config change like this, `pnpm exec
+  jest --clearCache` before concluding something is actually broken.
+- `packages/sdk` has no ESLint configuration yet, only `apps/api` and
+  `apps/web` do (inherited from their scaffolding tools). Strict
+  TypeScript and Prettier formatting catch a lot in the meantime; add
+  ESLint here if the package grows enough to want it.

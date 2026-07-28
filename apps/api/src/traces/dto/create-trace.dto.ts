@@ -1,3 +1,4 @@
+import type { CreateTracePayload } from '@agenttrace/shared-types';
 import {
   IsEnum,
   IsISO8601,
@@ -10,7 +11,11 @@ import {
 } from 'class-validator';
 import { TraceStatus } from '../../../generated/prisma/client.js';
 
-export class CreateTraceDto {
+// `implements CreateTracePayload` is a compile-time shape check only, it
+// catches the API and the SDK's wire contract drifting apart. It does not
+// validate anything at runtime; the class-validator decorators below are
+// still the actual runtime validation for incoming requests.
+export class CreateTraceDto implements CreateTracePayload {
   // The client's stable identifier for this trace, reused across calls as
   // the trace progresses (e.g. reported RUNNING, then reported again as
   // SUCCESS once it finishes). Not just a retry-safety key, see
