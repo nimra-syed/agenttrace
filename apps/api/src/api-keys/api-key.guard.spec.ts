@@ -20,12 +20,15 @@ function contextWithHeaders(headers: Record<string, string>): {
 describe('ApiKeyGuard', () => {
   let guard: ApiKeyGuard;
   let prisma: {
-    apiKey: { findUnique: jest.Mock };
+    apiKey: { findUnique: jest.Mock; update: jest.Mock };
   };
 
   beforeEach(() => {
     prisma = {
-      apiKey: { findUnique: jest.fn() },
+      apiKey: {
+        findUnique: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+      },
     };
     guard = new ApiKeyGuard(prisma as unknown as PrismaService);
   });
@@ -87,6 +90,56 @@ describe('ApiKeyGuard', () => {
       apiKeyId: 'key-1',
       projectId: 'project-1',
       orgId: 'org-1',
+    });
+  });
+
+  it('updates lastUsedAt when it has never been set', async () => {
+    prisma.apiKey.findUnique.mockResolvedValue({
+      id: 'key-1',
+      revokedAt: null,
+      lastUsedAt: null,
+      project: { id: 'project-1', orgId: 'org-1' },
+    });
+
+    const { context } = contextWithHeaders({ authorization: 'Bearer atr_x' });
+    await guard.canActivate(context);
+
+    expect(prisma.apiKey.update).toHaveBeenCalledWith({
+      where: { id: 'key-1' },
+      data: { lastUsedAt: expect.any(Date) as Date },
+    });
+  });
+
+  it('does not update lastUsedAt when it was set recently', async () => {
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    prisma.apiKey.findUnique.mockResolvedValue({
+      id: 'key-1',
+      revokedAt: null,
+      lastUsedAt: fiveMinutesAgo,
+      project: { id: 'project-1', orgId: 'org-1' },
+    });
+
+    const { context } = contextWithHeaders({ authorization: 'Bearer atr_x' });
+    await guard.canActivate(context);
+
+    expect(prisma.apiKey.update).not.toHaveBeenCalled();
+  });
+
+  it('updates lastUsedAt again once the stored value is more than an hour old', async () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    prisma.apiKey.findUnique.mockResolvedValue({
+      id: 'key-1',
+      revokedAt: null,
+      lastUsedAt: twoHoursAgo,
+      project: { id: 'project-1', orgId: 'org-1' },
+    });
+
+    const { context } = contextWithHeaders({ authorization: 'Bearer atr_x' });
+    await guard.canActivate(context);
+
+    expect(prisma.apiKey.update).toHaveBeenCalledWith({
+      where: { id: 'key-1' },
+      data: { lastUsedAt: expect.any(Date) as Date },
     });
   });
 

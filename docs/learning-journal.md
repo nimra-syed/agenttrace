@@ -1,5 +1,125 @@
 # Learning Journal
 
+## M4 — Trace ingestion API (2026-07-27)
+
+### What I built
+
+- `POST /traces` and `POST /traces/:traceId/spans`, the first endpoints
+  meant to be called by code (an agent's own instrumentation) instead of
+  a person testing the API by hand.
+- Both act as an upsert: a client supplied `externalTraceId` /
+  `externalSpanId` decides whether a request creates a new row or
+  updates an existing one, so an agent can report a trace as started,
+  then report the same trace again later as finished.
+- A `Span.parentSpanId` check requiring the referenced parent span to
+  already exist and belong to the same trace, plus a check preventing a
+  span from being its own parent.
+- Renamed `Trace.idempotencyKey` to `Trace.externalTraceId`, and added
+  `Span.externalSpanId`, after realizing the old name described the
+  wrong concept.
+- Finished the `ApiKey.lastUsedAt` work deferred from M3: it now updates
+  after a key successfully authenticates, throttled to once per hour.
+
+### What I learned
+
+- A name can be technically functional but still wrong, in a way that
+  would eventually cause a real bug. `idempotencyKey` worked, the
+  unique-constraint-plus-upsert mechanism was already correct, but the
+  name itself invited the wrong usage: standard idempotency-key advice
+  says to generate a fresh key per request, which would have silently
+  broken the exact "report now, update later" pattern the field existed
+  to support. Renaming it to `externalTraceId` fixed nothing about the
+  code, only the name, and that was the actual fix.
+- Prisma treats `undefined` and `null` differently on purpose in
+  `create`/`update` data: `undefined` means "do not mention this
+  column," `null` means "write an actual NULL." This is exactly the
+  tool needed for "an omitted field on an update should not overwrite
+  existing data," as long as application code does not accidentally
+  apply a default (like `status ?? RUNNING`) to a field before it
+  reaches Prisma, which would turn an intentionally-omitted field into
+  an explicit overwrite.
+- Nullable JSON columns are a genuine Prisma special case: a plain `null`
+  is ambiguous between "no value" and "the JSON value `null`," so Prisma
+  has a distinct `Prisma.DbNull` sentinel for "actually clear this
+  column," different from passing `null` directly.
+- An atomic database operation (`upsert()`) and an informational read
+  used only for validation are not the same kind of "read before write."
+  The race a retried request could cause is specifically about the
+  create-or-update *decision*, which stays inside the single atomic
+  call; a read done purely to check something like self-parenting
+  doesn't reintroduce that race, since it never decides how the write
+  itself resolves.
+- A constraint can be worth documenting as a real limitation rather than
+  silently working around: parent-first ingestion (a span's parent must
+  already exist) is simple and correct for a synchronous agent, but
+  would break for any future out-of-order or batched ingestion. Writing
+  that down now means it won't need to be rediscovered later.
+
+### Decisions made
+
+- ADR-0008: upsert-based ingestion, undefined vs null update semantics,
+  the externalTraceId/externalSpanId rename, parent-first ingestion as a
+  documented limitation, semantic validation rules, and the lastUsedAt
+  update timing.
+
+### Problems encountered and how we resolved them
+
+- `prisma migrate dev` refused to run at all in this non-interactive
+  terminal, even with `--create-only`, since it always wants to be able
+  to prompt. Worked around with `expect` to drive the interactive
+  confirmation prompt for `--create-only` (generating the migration file
+  without applying it), reviewed the generated SQL, then applied it
+  non-interactively with `prisma migrate deploy`, which is meant for
+  exactly that.
+- A broken `NODE_OPTIONS` environment variable (pointing at a missing
+  harness file, unrelated to this project) made every `node`/`pnpm`
+  command fail outright partway through this session. Worked around
+  per-command with `NODE_OPTIONS=""`, documented in `CLAUDE.md` so it
+  isn't mistaken for a project problem next time.
+- TypeScript rejected passing `unknown`-typed DTO fields directly into
+  Prisma's JSON columns, correctly, since Prisma's JSON input type is
+  more specific than `unknown`. Fixed with a small `toJsonInput` helper
+  that also handles the `Prisma.DbNull` case from above.
+
+### Interview questions I should be able to answer
+
+- Why does this ingestion API use upsert instead of separate start/end
+  endpoints for a trace or span?
+- What is the actual difference between `undefined` and `null` in a
+  Prisma update call, and why does that distinction matter for a
+  "report now, update later" API?
+- Why was `idempotencyKey` the wrong name for a field whose mechanism
+  was already correct?
+- What does "parent-first ingestion" mean, and what would break it?
+- Why doesn't a validation-only read before an `upsert()` call
+  reintroduce the race that the atomic upsert is meant to prevent?
+
+### Common mistakes engineers make here
+
+- Applying a default value (`?? someDefault`) to a field on both the
+  create and update paths of an upsert, which silently overwrites
+  existing data with a default on every update where the client didn't
+  resend that field.
+- Naming a field after the mechanism it happens to use (idempotency)
+  instead of the concept it actually represents (a stable client
+  identity), which invites correct-sounding advice for the wrong
+  concept.
+- Treating `null` and an omitted field as the same thing when building
+  update payloads, when they need to mean different things: clear this,
+  versus leave it alone.
+- Assuming any read before a write reintroduces a race condition,
+  instead of checking specifically whether that read is used to decide
+  the write's outcome.
+
+### How this milestone improves my resume
+
+"Designed an idempotent trace/span ingestion API (atomic upsert
+semantics, undefined-vs-null update handling, parent-first referential
+validation) that supports both one-shot and progressive reporting from
+client SDKs" is a specific, real claim about API design for a system
+that receives data from external clients, not just CRUD over your own
+frontend.
+
 ## M3 — API keys, create and revoke (2026-07-24)
 
 ### What I built

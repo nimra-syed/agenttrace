@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { ApiKeyContext } from './current-api-key.decorator';
 
 const BEARER_PREFIX = 'Bearer ';
+const LAST_USED_THROTTLE_MS = 60 * 60 * 1000;
 
 // One generic message for every failure mode (missing header, malformed
 // header, unknown key, revoked key). Never reveal which case it was, so a
@@ -43,12 +44,24 @@ export class ApiKeyGuard implements CanActivate {
       throw new UnauthorizedException(INVALID_API_KEY_MESSAGE);
     }
 
-    // lastUsedAt is intentionally not updated here. Writing it on every
-    // authenticated request would add a database write to every future
-    // ingestion call (M4), which is the highest-volume path in this
-    // system. Revisit with a throttled or async update (e.g. only write
-    // when the stored value is more than an hour old) once ingestion
-    // exists and this actually matters.
+    // lastUsedAt reflects successful authentication, not whether the
+    // request that follows also succeeds, a key that's always presented
+    // correctly but whose requests happen to fail validation is still
+    // "in use," and should not look stale. Throttled to at most one write
+    // per key per hour, regardless of request volume, so this never
+    // becomes a write-amplification problem on the ingestion path. Not
+    // awaited, and failure here must never block or fail an otherwise
+    // valid authenticated request. See ADR-0007 and ADR-0008.
+    const now = new Date();
+    const lastUsedIsStale =
+      !apiKey.lastUsedAt ||
+      now.getTime() - apiKey.lastUsedAt.getTime() > LAST_USED_THROTTLE_MS;
+
+    if (lastUsedIsStale) {
+      void this.prisma.apiKey
+        .update({ where: { id: apiKey.id }, data: { lastUsedAt: now } })
+        .catch(() => undefined);
+    }
 
     const apiKeyContext: ApiKeyContext = {
       apiKeyId: apiKey.id,

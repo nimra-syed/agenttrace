@@ -112,27 +112,27 @@ model ApiKey {
 }
 
 model Trace {
-  id             String      @id @default(uuid())
-  projectId      String
-  idempotencyKey String?
-  name           String
-  agentName      String
-  status         TraceStatus @default(RUNNING)
-  input          Json?
-  output         Json?
-  error          String?
-  startedAt      DateTime
-  endedAt        DateTime?
-  durationMs     Int?
-  totalTokens    Int?
-  totalCostUsd   Decimal?    @db.Decimal(10, 6)
-  metadata       Json?
-  createdAt      DateTime    @default(now())
+  id              String      @id @default(uuid())
+  projectId       String
+  externalTraceId String?
+  name            String
+  agentName       String
+  status          TraceStatus @default(RUNNING)
+  input           Json?
+  output          Json?
+  error           String?
+  startedAt       DateTime
+  endedAt         DateTime?
+  durationMs      Int?
+  totalTokens     Int?
+  totalCostUsd    Decimal?    @db.Decimal(10, 6)
+  metadata        Json?
+  createdAt       DateTime    @default(now())
 
   project Project @relation(fields: [projectId], references: [id])
   spans   Span[]
 
-  @@unique([projectId, idempotencyKey])
+  @@unique([projectId, externalTraceId])
   @@index([projectId, startedAt(sort: Desc)])
   @@index([projectId, status])
 }
@@ -140,6 +140,7 @@ model Trace {
 model Span {
   id               String     @id @default(uuid())
   traceId          String
+  externalSpanId   String?
   parentSpanId     String?
   name             String
   type             SpanType
@@ -160,5 +161,6 @@ model Span {
 
   trace Trace @relation(fields: [traceId], references: [id])
 
+  @@unique([traceId, externalSpanId])
   @@index([traceId])
 }

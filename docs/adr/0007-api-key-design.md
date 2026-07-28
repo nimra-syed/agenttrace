@@ -41,6 +41,9 @@ still in use." Revisit with a throttled or asynchronous update (for
 example, only write when the stored value is more than an hour old)
 once ingestion exists and the tradeoff actually matters.
 
+Update, from M4: this is now implemented, throttled to once per hour per
+key. See ADR-0008 for the reasoning on when exactly it updates.
+
 Authentication with a key uses a normal `Authorization: Bearer <key>`
 header, checked by a new `ApiKeyGuard`. Every failure case, a missing
 header, a malformed header, an unknown key, or a revoked key, returns the

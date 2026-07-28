@@ -4,7 +4,7 @@ Observability and evaluation platform for AI agents — records an agent's
 LLM calls, tool calls, latency, token usage, cost, and errors as
 traces/spans, and presents them in a web dashboard.
 
-Status: early development (M3, API key create and revoke done). See
+Status: early development (M4, trace ingestion API done). See
 [`CLAUDE.md`](./CLAUDE.md) for architecture and conventions, and
 [`docs/adr/`](./docs/adr) for the reasoning behind major decisions.
 
@@ -66,6 +66,25 @@ curl -H "Authorization: Bearer <key>" localhost:3000/api-keys/verify
 
 curl -b cookies.txt -X DELETE localhost:3000/projects/<projectId>/api-keys/<keyId>
 curl -H "Authorization: Bearer <key>" localhost:3000/api-keys/verify   # now fails
+```
+
+## Trying trace ingestion locally
+
+```bash
+# using a fresh, unrevoked key from above
+TRACE_ID=$(curl -s -H "Authorization: Bearer <key>" -X POST localhost:3000/traces \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"issue-investigation","agentName":"github-agent","startedAt":"2026-07-27T10:00:00.000Z","externalTraceId":"run-1"}' \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+
+curl -H "Authorization: Bearer <key>" -X POST "localhost:3000/traces/$TRACE_ID/spans" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"call-llm","type":"LLM","startedAt":"2026-07-27T10:00:01.000Z","endedAt":"2026-07-27T10:00:03.000Z","durationMs":2000,"promptTokens":120,"completionTokens":40}'
+
+# report the trace finishing, same externalTraceId, updates the same row
+curl -H "Authorization: Bearer <key>" -X POST localhost:3000/traces \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"issue-investigation","agentName":"github-agent","status":"SUCCESS","startedAt":"2026-07-27T10:00:00.000Z","endedAt":"2026-07-27T10:00:04.000Z","durationMs":4000,"externalTraceId":"run-1"}'
 ```
 
 ## Commands

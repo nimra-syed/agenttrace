@@ -56,6 +56,17 @@ applied per route with `@UseGuards(ApiKeyGuard)`, alongside `@Public()`
 to skip the session guard, it is not global like `SessionGuard`, since
 most routes are for a logged in person, not a key holder.
 
+Trace and span ingestion (`POST /traces`, `POST /traces/:traceId/spans`)
+lives in `apps/api/src/traces/` (one module for both, they are one
+bounded concept, see ADR-0008). Both are upserts keyed by a client
+supplied `externalTraceId` / `externalSpanId`, not the old
+`idempotencyKey` name from M1, see ADR-0008 for why that rename mattered.
+An omitted field on an update leaves the existing value untouched; an
+explicit `null` clears it, this relies on real Prisma behavior
+(`undefined` vs `null` in `create`/`update` data), not something we
+built ourselves. `parentSpanId` requires parent-first ingestion (the
+parent must already exist), a real limitation, see ADR-0008.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -123,12 +134,19 @@ database needed for these.
   these messages without changing all of them.
 - Random tokens (sessions and API keys) always use `crypto.randomBytes`,
   never `Math.random()`.
+- Ingestion writes always go through Prisma's atomic `upsert()`, never a
+  find-then-create/update flow in application code, so concurrent
+  retries with the same `externalTraceId`/`externalSpanId` cannot create
+  duplicate rows.
+- `lastUsedAt` on an API key updates after successful authentication, not
+  after the request that follows also succeeds, and is throttled to at
+  most once per hour per key. See ADR-0008.
 
 ## Current milestone
 
-M3 complete. Next: M4 — trace ingestion API, the first real endpoint
-that `ApiKeyGuard` protects, and the first place `GET /api-keys/verify`
-gets a real answer to the "should this stay" question from ADR-0007.
+M4 complete. Next: M5 — a lightweight TypeScript SDK wrapping the
+ingestion API, so instrumenting an agent means calling a few SDK
+functions instead of constructing raw HTTP requests by hand.
 
 ## Known technical debt
 
@@ -149,7 +167,21 @@ gets a real answer to the "should this stay" question from ADR-0007.
 - Jest hits the same `.js`-extension resolution problem as `ts-node` did.
   Fixed with a `moduleNameMapper` entry in `apps/api/package.json`'s jest
   config that strips `.js` from relative imports before resolving them.
-- `GET /api-keys/verify` is a temporary diagnostic endpoint, added only
-  to prove `ApiKeyGuard` works before M4 gives us a real endpoint to test
-  it against. Decide at M4 whether to remove it, gate it, or keep it on
-  purpose. See ADR-0007.
+- `GET /api-keys/verify` was decided at M4: kept permanently as a
+  supported "check my credentials" endpoint, not removed now that real
+  ingestion endpoints exist. See ADR-0007 and ADR-0008.
+- Ingestion requires parent-first ordering: a span's `parentSpanId` must
+  reference an already-created span. Out-of-order or batched ingestion
+  is not supported. See ADR-0008.
+- `Span.parentSpanId` is still a plain string column, not a real foreign
+  key (from M1). `parentSpanId` referential integrity is enforced in
+  application code (`SpansService`), not by the database.
+- If a shell session has a broken `NODE_OPTIONS` (pointing at a missing
+  harness preload file), every `node`/`pnpm` command fails with
+  `MODULE_NOT_FOUND`. Not a project issue, work around per-command with
+  `NODE_OPTIONS="" <command>`.
+- `prisma migrate dev` refuses to run in a non-interactive terminal at
+  all, even with `--create-only`. Workaround: `prisma migrate dev
+  --create-only` under `expect` (auto-answering the confirmation prompt)
+  to generate the migration file, inspect it, then apply it
+  non-interactively with `prisma migrate deploy`.
