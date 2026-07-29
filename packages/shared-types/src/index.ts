@@ -136,6 +136,18 @@ export interface CreateProjectPayload {
   name: string;
 }
 
+// What GET /projects/:projectId/traces/:traceId returns (M8). Spans are
+// flat, ordered chronologically (startedAt asc, id asc as a
+// deterministic tiebreaker, same reasoning as the list endpoint's
+// cursor order in reverse), not nested. Building the parent/child tree
+// is a rendering concern, not a wire-format concern: the frontend needs
+// per-span timing to draw a waterfall anyway, so it has to walk this
+// array regardless of whether the API pre-nests it.
+export interface TraceDetailResponse {
+  trace: TraceRecord;
+  spans: SpanRecord[];
+}
+
 // What POST /traces/:traceId/spans returns.
 export interface SpanRecord {
   id: string;

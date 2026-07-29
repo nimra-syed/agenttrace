@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { ListTracesResponse, TraceRecord } from '@agenttrace/shared-types';
+import type {
+  ListTracesResponse,
+  TraceDetailResponse,
+  TraceRecord,
+} from '@agenttrace/shared-types';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { TraceStatus } from '../../generated/prisma/client.js';
 import { toJsonInput } from '../common/json-input.util';
@@ -10,6 +14,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { decodeCursor, encodeCursor } from './cursor.util';
 import { CreateTraceDto } from './dto/create-trace.dto';
 import { DEFAULT_LIMIT, ListTracesDto } from './dto/list-traces.dto';
+import { toSpanRecord } from './span-record.mapper';
 import { toTraceRecord } from './trace-record.mapper';
 
 @Injectable()
@@ -149,6 +154,32 @@ export class TracesService {
       items: page.map(toTraceRecord),
       nextCursor:
         hasMore && lastRow ? encodeCursor(lastRow.startedAt, lastRow.id) : null,
+    };
+  }
+
+  // Session-authenticated (a person viewing one run's detail), same org
+  // scoping as list(). Spans come back flat, ordered chronologically
+  // (startedAt asc, id asc, the same deterministic-tiebreaker reasoning
+  // as list()'s cursor order, just ascending instead of descending: a
+  // waterfall reads top to bottom in the order things happened).
+  // Building the parent/child tree from parentSpanId is left to the
+  // frontend, see TraceDetailResponse in packages/shared-types.
+  async getDetail(
+    orgId: string,
+    projectId: string,
+    traceId: string,
+  ): Promise<TraceDetailResponse> {
+    await this.projectsService.findOwnedProject(orgId, projectId);
+    const trace = await this.findOwnedTrace(projectId, traceId);
+
+    const spans = await this.prisma.span.findMany({
+      where: { traceId },
+      orderBy: [{ startedAt: 'asc' }, { id: 'asc' }],
+    });
+
+    return {
+      trace: toTraceRecord(trace),
+      spans: spans.map(toSpanRecord),
     };
   }
 }

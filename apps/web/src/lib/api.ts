@@ -6,6 +6,7 @@ import type {
   LoginPayload,
   ProjectRecord,
   SignupPayload,
+  TraceDetailResponse,
 } from "@agenttrace/shared-types";
 
 export class ApiError extends Error {
@@ -123,4 +124,11 @@ export function listTraces(
   return request(
     `/projects/${projectId}/traces${queryString ? `?${queryString}` : ""}`,
   );
+}
+
+export function getTraceDetail(
+  projectId: string,
+  traceId: string,
+): Promise<TraceDetailResponse> {
+  return request(`/projects/${projectId}/traces/${traceId}`);
 }

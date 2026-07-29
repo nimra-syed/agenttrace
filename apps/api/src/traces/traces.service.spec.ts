@@ -15,6 +15,9 @@ describe('TracesService', () => {
       findUnique: jest.Mock;
       findMany: jest.Mock;
     };
+    span: {
+      findMany: jest.Mock;
+    };
   };
   let projectsService: { findOwnedProject: jest.Mock };
 
@@ -24,6 +27,9 @@ describe('TracesService', () => {
         create: jest.fn(),
         upsert: jest.fn(),
         findUnique: jest.fn(),
+        findMany: jest.fn(),
+      },
+      span: {
         findMany: jest.fn(),
       },
     };
@@ -56,6 +62,32 @@ describe('TracesService', () => {
       durationMs: 60000,
       totalTokens: 100,
       totalCostUsd: null,
+      metadata: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      ...overrides,
+    };
+  }
+
+  function fakeSpanRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'span-1',
+      traceId: 'trace-1',
+      externalSpanId: null,
+      parentSpanId: null,
+      name: 'call-llm',
+      type: 'LLM',
+      status: 'SUCCESS',
+      input: null,
+      output: null,
+      model: null,
+      provider: null,
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      error: null,
+      startedAt: new Date('2026-01-01T00:00:00.000Z'),
+      endedAt: new Date('2026-01-01T00:01:00.000Z'),
+      durationMs: 60000,
       metadata: null,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       ...overrides,
@@ -308,6 +340,113 @@ describe('TracesService', () => {
 
       expect(result.items[0].startedAt).toBe('2026-01-01T00:00:00.000Z');
       expect(typeof result.items[0].startedAt).toBe('string');
+    });
+  });
+
+  describe('getDetail', () => {
+    it("rejects a project outside the caller's org, before ever querying the trace", async () => {
+      projectsService.findOwnedProject.mockRejectedValue(
+        new NotFoundException('Project not found'),
+      );
+
+      await expect(
+        tracesService.getDetail('org-1', 'someone-elses-project', 'trace-1'),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.trace.findUnique).not.toHaveBeenCalled();
+      expect(prisma.span.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a trace that belongs to a different project than the one in the URL', async () => {
+      projectsService.findOwnedProject.mockResolvedValue({ id: 'project-1' });
+      prisma.trace.findUnique.mockResolvedValue(
+        fakeTraceRow({ id: 'trace-1', projectId: 'someone-elses-project' }),
+      );
+
+      await expect(
+        tracesService.getDetail('org-1', 'project-1', 'trace-1'),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.span.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a nonexistent trace id', async () => {
+      projectsService.findOwnedProject.mockResolvedValue({ id: 'project-1' });
+      prisma.trace.findUnique.mockResolvedValue(null);
+
+      await expect(
+        tracesService.getDetail('org-1', 'project-1', 'no-such-trace'),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.span.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty spans array for a trace with no spans yet', async () => {
+      projectsService.findOwnedProject.mockResolvedValue({ id: 'project-1' });
+      prisma.trace.findUnique.mockResolvedValue(fakeTraceRow());
+      prisma.span.findMany.mockResolvedValue([]);
+
+      const result = await tracesService.getDetail(
+        'org-1',
+        'project-1',
+        'trace-1',
+      );
+
+      expect(result.spans).toEqual([]);
+      expect(result.trace.id).toBe('trace-1');
+    });
+
+    it('always orders spans by (startedAt asc, id asc), the deterministic tiebreaker', async () => {
+      projectsService.findOwnedProject.mockResolvedValue({ id: 'project-1' });
+      prisma.trace.findUnique.mockResolvedValue(fakeTraceRow());
+      prisma.span.findMany.mockResolvedValue([fakeSpanRow()]);
+
+      await tracesService.getDetail('org-1', 'project-1', 'trace-1');
+
+      const calls = prisma.span.findMany.mock.calls as {
+        where: { traceId: string };
+        orderBy: unknown;
+      }[][];
+      expect(calls[0][0].where).toEqual({ traceId: 'trace-1' });
+      expect(calls[0][0].orderBy).toEqual([
+        { startedAt: 'asc' },
+        { id: 'asc' },
+      ]);
+    });
+
+    it('maps a real Prisma Decimal span cost to a plain JS number, not a string', async () => {
+      projectsService.findOwnedProject.mockResolvedValue({ id: 'project-1' });
+      prisma.trace.findUnique.mockResolvedValue(
+        fakeTraceRow({ totalCostUsd: new Prisma.Decimal('9.870000') }),
+      );
+      prisma.span.findMany.mockResolvedValue([
+        fakeSpanRow({ costUsd: new Prisma.Decimal('3.210000') }),
+      ]);
+
+      const result = await tracesService.getDetail(
+        'org-1',
+        'project-1',
+        'trace-1',
+      );
+
+      expect(result.trace.totalCostUsd).toBe(9.87);
+      expect(typeof result.trace.totalCostUsd).toBe('number');
+      expect(result.spans[0].costUsd).toBe(3.21);
+      expect(typeof result.spans[0].costUsd).toBe('number');
+    });
+
+    it('maps trace and span Date fields to ISO strings, matching the wire format contract', async () => {
+      projectsService.findOwnedProject.mockResolvedValue({ id: 'project-1' });
+      prisma.trace.findUnique.mockResolvedValue(fakeTraceRow());
+      prisma.span.findMany.mockResolvedValue([fakeSpanRow()]);
+
+      const result = await tracesService.getDetail(
+        'org-1',
+        'project-1',
+        'trace-1',
+      );
+
+      expect(result.trace.startedAt).toBe('2026-01-01T00:00:00.000Z');
+      expect(typeof result.trace.startedAt).toBe('string');
+      expect(result.spans[0].startedAt).toBe('2026-01-01T00:00:00.000Z');
+      expect(typeof result.spans[0].startedAt).toBe('string');
     });
   });
 });

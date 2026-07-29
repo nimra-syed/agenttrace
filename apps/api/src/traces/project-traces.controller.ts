@@ -24,4 +24,13 @@ export class ProjectTracesController {
   ) {
     return this.tracesService.list(user.orgId, projectId, query);
   }
+
+  @Get(':traceId')
+  getDetail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('projectId') projectId: string,
+    @Param('traceId') traceId: string,
+  ) {
+    return this.tracesService.getDetail(user.orgId, projectId, traceId);
+  }
 }

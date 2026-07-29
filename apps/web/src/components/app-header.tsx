@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { logout, me } from "@/lib/api";
 
@@ -17,9 +18,9 @@ export function AppHeader() {
 
   return (
     <header className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-      <a href="/projects" className="font-semibold">
+      <Link href="/projects" className="font-semibold">
         AgentTrace
-      </a>
+      </Link>
       <div className="flex items-center gap-4 text-sm text-gray-600">
         {user && <span>{user.email}</span>}
         <button onClick={() => void handleLogout()} className="underline">
