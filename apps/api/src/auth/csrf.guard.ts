@@ -21,7 +21,7 @@ type CsrfRelevantRequest = Request & {
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 // Runs after SessionGuard (registered second in AuthModule's providers,
-// see ADR-0013 on APP_GUARD ordering), so request.user/request.sessionId
+// see ADR-0014 on APP_GUARD ordering), so request.user/request.sessionId
 // are already populated when this executes, if a session authenticated
 // the request at all.
 @Injectable()
@@ -41,7 +41,7 @@ export class CsrfGuard implements CanActivate {
     // there's nothing for CSRF to exploit there, regardless of why the
     // route happens to be @Public() (that decorator also covers
     // genuinely anonymous routes for an unrelated reason: skipping
-    // SessionGuard, not skipping CSRF). See ADR-0013.
+    // SessionGuard, not skipping CSRF). See ADR-0014.
     if (!request.user || request.apiKeyContext) return true;
 
     const header = request.headers[CSRF_HEADER_NAME];

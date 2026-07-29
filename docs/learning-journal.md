@@ -1,5 +1,260 @@
 # Learning Journal
 
+## M9 — CSRF protection and login/signup rate limiting (2026-07-29)
+
+### What I built
+
+- `AuthThrottlerGuard` (extending `@nestjs/throttler`'s `ThrottlerGuard`),
+  applied only to `POST /auth/login` and `POST /auth/signup` via
+  `@UseGuards`/`@Throttle`, not globally — no generous global backstop
+  to remember to exempt ingestion routes from.
+- A signed, session-bound CSRF token (`HMAC-SHA256(CSRF_SECRET,
+  session.id)`), not a naive double-submit cookie: `CsrfGuard` never
+  reads the request's own cookie, it recomputes the expected value
+  server-side and compares against a header with a constant-time
+  comparison.
+- `GET /auth/csrf`, a session-authenticated bootstrap endpoint letting
+  an existing session (or one whose CSRF cookie was separately lost)
+  recover a valid cookie without a full logout/login cycle.
+- Startup validation for `CSRF_SECRET` (required, not a placeholder, at
+  least 32 random bytes) that fails fast, before the API accepts any
+  traffic, rather than surfacing as a confusing error on the first login.
+- A frontend `ensureCsrfToken()` singleton promise that every mutating
+  API call awaits before running, so the guarantee "a mutation never
+  runs before a token exists" holds regardless of component call order.
+
+### What I learned
+
+- Reading code told me something curl couldn't: I assumed Next.js's
+  rewrite-based proxy (`next.config.ts`) would add its own
+  `X-Forwarded-For` hop the way a real reverse proxy does. It doesn't —
+  confirmed by adding a temporary debug endpoint and hitting it four
+  ways (direct, through the proxy, with and without a spoofed header).
+  It relays whatever the client sent, completely unmodified. Trusting
+  that header for rate limiting would have meant trusting a value any
+  caller can set to anything, which is worse than not trusting it at
+  all: it would look like real client-IP filtering while being
+  trivially bypassable. This is exactly why "verify the actual request
+  path, don't assume the framework does what a real reverse proxy
+  would" mattered here, not just in the abstract.
+- A "consistent normalization" question turned out to have a
+  falsifiable answer, not a matter of taste. I initially lowercased the
+  throttle's email key, assuming that was simply good practice. Asked
+  to confirm it matched authentication's own behavior, I checked (and
+  then verified live, by actually logging in with different casing
+  than used at signup) and found `AuthService`'s lookup is genuinely
+  case-sensitive — no normalization anywhere in the DTOs or the
+  `User.email` column. Lowercasing the throttle key would have bucketed
+  together requests that authentication treats as different accounts.
+  Removed it. The lesson generalizes: "this seems like good practice"
+  is not the same question as "does this match what the system it's
+  protecting actually does," and the second question has a real,
+  checkable answer.
+- A naive double-submit cookie (cookie value equals header value,
+  compared directly) only proves two requests came from the same
+  browser context, not that the *server* ever issued the value. Signing
+  the token (an HMAC only the server's secret could produce) and
+  binding it to the session id, then never even reading the request's
+  own cookie during validation, closes that gap: the trust decision
+  becomes "could this header value have been produced by the server for
+  this exact session," not "do two client-writable values happen to
+  match."
+- A route whose job is entirely about session validity (recovering a
+  CSRF token for an *existing* session) needs the raw bearer token to
+  never be re-derivable, which is exactly why it can't exist: only the
+  token's hash is stored (ADR-0005). Keying the CSRF HMAC on the
+  session row's own id instead solved this cleanly, but only because I
+  checked what was actually available on every request (loaded by
+  `SessionGuard` already) rather than assuming the raw token was an
+  option.
+- Rate limiting a specific mechanism (per-account, per-email) is not
+  the same claim as rate limiting the underlying threat class
+  (credential stuffing across many accounts, or signup spam across many
+  emails). Both remain possible against this design, on purpose,
+  documented as accepted debt rather than quietly out of scope.
+
+### Decisions made
+
+- ADR-0014: CSRF protection (signed, session-bound token; explicit
+  authentication-mechanism-based exemption, not `@Public()`-based; the
+  bootstrap endpoint; cookie attributes and rotation policy) and
+  login/signup rate limiting (email-keyed, not IP-keyed, and why;
+  process-local storage as a known limitation; credential-stuffing and
+  signup-bypass limitations explicitly accepted, not fixed, this
+  milestone).
+
+### Problems encountered and how we resolved them
+
+- My first `AuthThrottlerGuard` implementation lowercased the email
+  tracking key. Caught during review, verified live (logged in with
+  different casing than used at signup, confirmed it fails), fixed by
+  trimming only, not case-folding.
+- Calling the CSRF bootstrap endpoint automatically for every mutating
+  request would have broken login/signup itself: at the moment you're
+  logging in, no session exists yet, so bootstrapping a CSRF token
+  first would 401 and trigger the frontend's redirect-to-login handler
+  — meaning attempting to log in would immediately redirect you away
+  from the login page. Caught before it ever ran, by tracing through
+  what `ensureCsrfToken()` would actually do for those three specific
+  routes, and fixed with an explicit exemption list matching the
+  backend's own exemption logic.
+- The CSRF bootstrap endpoint returns `204 No Content`, which the
+  existing `request()` helper's unconditional `response.json()` call
+  would have thrown on (no body to parse). Fixed by special-casing 204
+  before attempting to parse a body.
+
+### Interview questions I should be able to answer
+
+- Why is a signed, session-bound CSRF token stronger than a naive
+  double-submit cookie, specifically?
+- Why does the CSRF guard never read the request's own cookie during
+  validation, and what does it check instead?
+- Why is the CSRF HMAC keyed on the session's database id rather than
+  the raw session token?
+- Why does keying the login/signup throttle on IP address not work in
+  this project's current deployment topology, and what does it use
+  instead?
+- What does per-email rate limiting *not* protect against, and why was
+  that accepted rather than fixed in this milestone?
+
+### Common mistakes engineers make here
+
+- Assuming a reverse-proxy-shaped mechanism (a URL rewrite) provides
+  reverse-proxy-shaped guarantees (a trustworthy `X-Forwarded-For` hop)
+  without checking.
+- Normalizing an identifier (lowercasing an email) because it "seems
+  like good practice," without checking whether the system whose
+  behavior it's supposed to mirror actually does the same normalization.
+- Implementing double-submit CSRF protection as a literal string
+  comparison between a cookie and a header, without considering whether
+  the server ever actually vouched for that value.
+- Deriving a per-session secret from a raw bearer token, which only
+  works once (at issuance) and can't be recomputed later for an
+  existing session, instead of from a stable, already-available,
+  non-sensitive identifier like the session row's own id.
+- Fixing one mechanism (per-account throttling) and describing it as if
+  it closes the whole threat category (brute force) it's named after,
+  instead of being explicit about what it does and doesn't cover.
+
+### How this milestone improves my resume
+
+"Closed two previously-documented security gaps in a session-based auth
+system: a signed, session-bound CSRF token (verified stronger than a
+naive double-submit cookie) and account-targeted rate limiting, with
+both the network-topology assumption (trusting X-Forwarded-For) and the
+throttle key's consistency with the system's actual authentication
+behavior verified empirically rather than assumed" is a specific,
+concrete claim about closing a real gap correctly, not just adding a
+middleware and calling it done.
+
+## M8 — Trace detail view (2026-07-29)
+
+### What I built
+
+- `GET /projects/:projectId/traces/:traceId`, returning a flat,
+  chronologically-ordered span array (not pre-nested), plus the trace
+  detail page in `apps/web`: a summary card and a custom span
+  waterfall.
+- Two-pass span tree construction (`span-waterfall.tsx`): every span
+  becomes a node before any linking happens, so a child appearing
+  before its parent in the array never matters, and a span whose parent
+  is missing, self-referential, or would close a cycle becomes a root
+  instead of being dropped or causing infinite recursion.
+- A deterministic effective-end calculation for the waterfall's bar
+  widths (`trace.endedAt ?? max span endedAt ?? max span startedAt ??
+  trace.startedAt`), never wall-clock `now`.
+- Collapsible input/output/metadata payloads (native `<details>`, no
+  library) and a hand-rolled waterfall (plain divs, no charting
+  dependency).
+
+### What I learned
+
+- A response contract question ("should spans come back pre-nested or
+  flat?") had a real answer once I asked what the frontend actually
+  needed: a waterfall needs each span's own timing relative to the
+  trace, which means walking every span regardless of whether the tree
+  was pre-built. Pre-nesting server-side would have added a second
+  representation to keep in sync for no removed work.
+- Tree-building code that assumes its input is a valid tree (every
+  parent reference resolves, no cycles) will eventually meet data that
+  isn't one — not because ingestion is expected to produce it today
+  (parent-first ingestion, ADR-0008, already prevents a cycle through
+  the normal path), but because "the normal path prevents it" and "the
+  code that renders it is safe if it doesn't" are two different
+  guarantees, and only one of them is actually enforced by construction
+  once you also consider future out-of-order ingestion or direct data
+  edits. Building the guard in (two-pass construction, explicit cycle
+  detection, a depth cap) rather than trusting the input was cheaper
+  than it looked, and worth verifying live with a real, deliberately
+  malformed mutual-reference case, not just reasoning about it.
+- A trace's own `totalTokens`/`totalCostUsd` and a naive sum of its
+  spans' token/cost fields are not guaranteed to be the same number,
+  and treating them as interchangeable would have been an assumption,
+  not a fact — confirmed by rereading `CreateTraceDto` and finding they
+  really are independent, explicitly-reported fields, not derived ones.
+- Effective "now," for a still-running trace with no `endedAt`, has to
+  come from data already on hand (the latest known timestamp), not
+  wall-clock time — otherwise a waterfall's bar widths would shift on
+  every reload and disagree with whatever `durationMs` the client
+  actually reported.
+
+### Decisions made
+
+- ADR-0013 (written retroactively; the decision was made and shipped in
+  this milestone, but the ADR itself was written later after the gap
+  was noticed): the flat response contract, two-pass cycle-safe tree
+  construction, the effective-end calculation, never re-summing
+  trace-level totals from spans, and no charting dependency for the
+  waterfall.
+
+### Problems encountered and how we resolved them
+
+- The ingestion API's own parent-must-already-exist validation
+  (ADR-0008) meant I couldn't construct an orphaned or cyclic span
+  through normal means to test the frontend's defenses against one.
+  Resolved by writing malformed `parentSpanId` values directly to the
+  database for the test, then reverting them — a deliberate,
+  temporary violation of the normal path specifically to prove the
+  rendering code doesn't depend on that path always holding.
+- This milestone's own documentation pass (ADR, learning journal entry,
+  the `CLAUDE.md` milestone marker) was skipped entirely at the time
+  and only caught later, while working on M9's docs. Backfilled here.
+  Worth remembering: "pause for review before committing" covers the
+  code, but a milestone isn't actually done until the docs pass runs
+  too, and that step is easy to drop silently when a session moves
+  straight from "approved" to "commit."
+
+### Interview questions I should be able to answer
+
+- Why does the trace detail endpoint return spans as a flat array
+  instead of a pre-built tree?
+- Walk through how the span tree builder protects against a cycle in
+  `parentSpanId`, step by step.
+- Why does the waterfall never use `Date.now()` to size a still-running
+  span's bar?
+- Why must a trace's `totalTokens`/`totalCostUsd` be displayed as
+  reported, not recomputed from its spans?
+
+### Common mistakes engineers make here
+
+- Assuming a data structure is always well-formed just because the
+  code that normally produces it enforces that shape, and skipping
+  defensive handling in the code that later consumes it.
+- Using wall-clock time to size a duration-based visualization for
+  something still in progress, instead of the latest timestamp actually
+  known.
+- Treating a "total" field on a parent record as if it must equal the
+  sum of its children's fields, without checking whether it's actually
+  derived that way.
+
+### How this milestone improves my resume
+
+"Built a trace detail view with a custom span waterfall (two-pass,
+cycle-safe tree construction verified against deliberately malformed
+data, not just well-formed test cases) without a charting dependency"
+is a specific, concrete claim about defensive data-structure handling,
+not just "displayed some data in a UI."
+
 ## M7 — Dashboard: list agent runs (2026-07-29)
 
 ### What I built

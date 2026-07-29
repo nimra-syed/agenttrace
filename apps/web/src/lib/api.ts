@@ -50,7 +50,7 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // an existing session (they create or destroy one), so there's no CSRF
 // token to attach yet and no point bootstrapping one first -- this is
 // the frontend's equivalent of CsrfGuard's own request.user-based
-// exemption on the backend. See ADR-0013.
+// exemption on the backend. See ADR-0014.
 const CSRF_EXEMPT_PATHS = new Set([
   "/auth/login",
   "/auth/signup",
@@ -58,7 +58,7 @@ const CSRF_EXEMPT_PATHS = new Set([
 ]);
 
 // Not httpOnly on the server side specifically so this can read it. See
-// csrf.util.ts and ADR-0013 for why the cookie's value, not some
+// csrf.util.ts and ADR-0014 for why the cookie's value, not some
 // separately-stored token, is what gets echoed back as a header.
 function readCsrfCookie(): string | null {
   if (typeof document === "undefined") return null; // server-rendered, no cookie jar to read
@@ -77,7 +77,7 @@ function readCsrfCookie(): string | null {
 // anything). Whichever mutating call happens first -- a proactive
 // warmup, or literally the first "create project" click -- triggers
 // and awaits this; every later mutating call awaits the same
-// already-resolved promise, effectively free. See ADR-0013.
+// already-resolved promise, effectively free. See ADR-0014.
 let csrfReadyPromise: Promise<void> | null = null;
 
 function ensureCsrfToken(): Promise<void> {

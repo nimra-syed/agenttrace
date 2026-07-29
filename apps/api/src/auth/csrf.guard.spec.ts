@@ -61,7 +61,7 @@ describe('CsrfGuard', () => {
     // "was this an API-key request," not merely "request.user happens
     // to be unset" -- today the two guards never both populate the
     // request, but the check should be robust to that changing later.
-    // See ADR-0013.
+    // See ADR-0014.
     const context = contextFor({
       method: 'POST',
       user: AUTHENTICATED_USER,

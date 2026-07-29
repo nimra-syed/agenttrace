@@ -72,7 +72,7 @@ describe('AuthService', () => {
       expect(result.token.length).toBeGreaterThan(20);
       // The session row's own id, not the raw token: CsrfGuard needs
       // this to recompute the expected CSRF token on later requests.
-      // See csrf.util.ts and ADR-0013.
+      // See csrf.util.ts and ADR-0014.
       expect(result.sessionId).toBe('session-1');
     });
 

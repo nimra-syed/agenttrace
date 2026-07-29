@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 
 // Non-httpOnly on purpose: unlike the session cookie, frontend JS has to
 // be able to read this one, to echo it back as a header. See
-// ADR-0013 for why the cookie's value plays no role in server-side
+// ADR-0014 for why the cookie's value plays no role in server-side
 // validation (the guard recomputes the expected value itself; the
 // cookie only exists to get that value into the browser).
 export const CSRF_COOKIE_NAME = 'agenttrace_csrf';
@@ -57,7 +57,7 @@ export function validateCsrfSecret(secret: string | undefined): string {
 // would be impossible. session.id is stable for the session's
 // lifetime, already loaded by SessionGuard on every request, and isn't
 // itself a sensitive bearer credential the way the raw token is. See
-// ADR-0013.
+// ADR-0014.
 export function computeCsrfToken(sessionId: string): string {
   const secret = validateCsrfSecret(process.env.CSRF_SECRET);
   return createHmac('sha256', secret).update(sessionId).digest('base64url');

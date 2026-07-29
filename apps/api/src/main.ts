@@ -5,7 +5,7 @@ import { AppModule } from './app.module';
 import { validateCsrfSecret } from './auth/csrf.util';
 
 // Deliberately not calling app.set('trust proxy', ...) anywhere. Confirmed
-// live (see ADR-0013): the Next.js frontend's rewrite-based proxy
+// live (see ADR-0014): the Next.js frontend's rewrite-based proxy
 // (next.config.ts) does not add its own X-Forwarded-For hop the way a
 // real reverse proxy would -- it relays whatever header the original
 // client sent, completely unmodified. Trusting that header today would

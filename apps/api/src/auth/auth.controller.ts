@@ -22,7 +22,7 @@ import { SESSION_COOKIE_NAME, SESSION_DURATION_MS } from './token.util';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Applied to signup and login specifically, not globally: see ADR-0013
+// Applied to signup and login specifically, not globally: see ADR-0014
 // for why there's no general-purpose global throttle (it would need to
 // exempt ingestion routes that legitimately see high-frequency traffic
 // from a busy agent, and AuthThrottlerGuard's email-based tracking key
@@ -95,7 +95,7 @@ export class AuthController {
   // created before this endpoint existed, or one whose CSRF cookie was
   // separately lost/cleared) recover a valid CSRF cookie without a full
   // logout/login cycle. GET, so CsrfGuard never enforces on this route
-  // itself regardless. See ADR-0013.
+  // itself regardless. See ADR-0014.
   @Get('csrf')
   @HttpCode(204)
   bootstrapCsrf(

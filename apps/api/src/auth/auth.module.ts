@@ -14,7 +14,7 @@ import { SessionGuard } from './session.guard';
     // Order matters: NestJS runs multiple APP_GUARD providers in
     // registration order. CsrfGuard needs request.user/request.sessionId,
     // which only exist once SessionGuard has already run, so SessionGuard
-    // must be registered first. See ADR-0013.
+    // must be registered first. See ADR-0014.
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
   ],

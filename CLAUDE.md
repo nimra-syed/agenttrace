@@ -119,6 +119,44 @@ frontend's 401 handler before redirecting to `/login`, specifically to
 clear a stale cookie, so it must work even when the session it is
 clearing is already invalid.
 
+`GET /projects/:projectId/traces/:traceId` (M8) returns a trace plus
+its spans as a **flat**, chronologically-ordered array
+(`startedAt ASC, id ASC`), not a pre-built tree, see ADR-0013.
+`apps/web`'s trace detail page (`SpanWaterfall`) builds the parent/child
+tree client-side in two passes (every span becomes a node before any
+linking happens), so a child appearing before its parent never matters,
+and a span whose parent is missing, self-referential, or would close a
+cycle becomes a root instead of being dropped or causing infinite
+recursion. Bar widths in the waterfall are sized from an effective-end
+calculation (`trace.endedAt ?? max span endedAt ?? max span startedAt
+?? trace.startedAt`), never wall-clock `now`. `totalTokens`/`totalCostUsd`
+are always displayed as the trace reported them, never re-summed from
+spans.
+
+CSRF protection and login/signup rate limiting were added at M9, see
+ADR-0014. The CSRF token is `HMAC-SHA256(CSRF_SECRET, session.id)`,
+delivered via a non-httpOnly `agenttrace_csrf` cookie the frontend
+reads and echoes back as an `X-CSRF-Token` header; `CsrfGuard` never
+reads the request's own cookie, it recomputes the expected value
+server-side and compares with `crypto.timingSafeEqual`. Enforcement is
+keyed on whether `SessionGuard` actually authenticated the request
+(`request.user` set, `request.apiKeyContext` unset), not on `@Public()`
+— the two decorators solve different problems and happen to overlap
+today, not by definition. `GET /auth/csrf` (session-authenticated) lets
+an existing session recover a lost CSRF cookie without a full
+logout/login cycle; `apps/web/src/lib/api.ts`'s `ensureCsrfToken()` is a
+singleton promise every mutating call awaits first, so a mutation can
+never run before a token exists regardless of component call order.
+`AuthThrottlerGuard` (applied only to `POST /auth/login` and
+`POST /auth/signup`, not globally) keys on the request's `email`, not
+IP — confirmed live that this project's Next.js proxy does not add a
+trustworthy `X-Forwarded-For` hop, so IP-based keying would have been
+trivially spoofable. The email key is trimmed but **not** lowercased:
+`AuthService`'s own lookup is case-sensitive (confirmed by reading it
+and by a live login test), and folding case in the throttle key would
+bucket together requests that authentication treats as different
+accounts.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -178,8 +216,29 @@ database needed for these.
   registered.
 - Authorization checks (project/org scoping) are tested explicitly, not
   just covered incidentally by happy-path tests.
-- No CSRF token library and no login rate limiting yet, both noted as
-  known gaps in ADR-0005, not oversights.
+- CSRF protection and login/signup rate limiting were closed at M9
+  (both had been noted as deliberate, deferred gaps in ADR-0005). See
+  ADR-0014. `CSRF_SECRET` is validated at process startup (required, at
+  least 32 random bytes, not a known placeholder) — the API refuses to
+  start otherwise, rather than surfacing a confusing error on first
+  login.
+- The login/signup rate limit does not defend against distributed
+  credential stuffing (many different accounts, one or two guesses
+  each) or signup spam (a new email per request) — both explicitly
+  accepted as known debt for M9, not fixed. See ADR-0014.
+- `@nestjs/throttler`'s default storage is process-local. If `apps/api`
+  ever runs as more than one instance, each instance enforces the login
+  rate limit independently, effectively multiplying the real limit by
+  the instance count. Deferred until horizontal scaling is an actual
+  need, same as other distributed-infrastructure decisions in this
+  project.
+- `main.ts` deliberately does not call `app.set('trust proxy', ...)`.
+  Confirmed live: the Next.js frontend's rewrite-based proxy does not
+  add its own `X-Forwarded-For` hop, it relays whatever the client sent
+  unmodified. Enabling `trust proxy` today would mean trusting a fully
+  attacker-controlled header. Revisit only once a real reverse proxy
+  that overwrites (not appends to) that header sits in front of this
+  stack.
 - `ApiKeyGuard` returns the exact same `401 Invalid API key` for a
   missing header, a malformed header, an unknown key, and a revoked key.
   This is tested directly (`api-key.guard.spec.ts`), do not change one of
@@ -209,10 +268,13 @@ database needed for these.
 
 ## Current milestone
 
-M7 complete: a dashboard listing agent runs (backend list endpoint plus
-the login/signup/projects/runs frontend), the first real functionality
-in `apps/web`. Verified with a manual browser test pass, see
-`docs/testing/m7-manual-browser-checklist.md`.
+M9 complete: CSRF protection and login/signup rate limiting (ADR-0014),
+closing two gaps deliberately deferred since ADR-0005. M8 (trace detail
+view with a span waterfall, ADR-0013) is also complete. Both verified
+with live manual testing, not just unit tests — see the M9 learning
+journal entry for the specific live checks run (X-Forwarded-For
+spoofing, email-casing consistency, CSRF bootstrap recovery, missing-
+token rejection, redirect-loop re-verification).
 
 ## Known technical debt
 
@@ -279,4 +341,16 @@ in `apps/web`. Verified with a manual browser test pass, see
 - No Playwright/e2e test infrastructure yet (deferred to M11, per plan).
   M7's frontend is covered by unit tests on the backend endpoint and a
   manual browser checklist (`docs/testing/m7-manual-browser-checklist.md`),
-  not automated UI tests.
+  not automated UI tests. M8 and M9's frontend changes were verified
+  with live manual browser testing each time but have no checklist
+  document of their own yet.
+- The span waterfall (M8) caps rendering depth at 50 levels; a real
+  trace nested deeper than that would show a count of hidden spans
+  rather than rendering them. Not expected in practice, a safety margin
+  against malformed data, not a real limitation for any trace this
+  project actually produces.
+- ADR-0013 (trace detail view, M8) was written retroactively during
+  M9's documentation pass, not at the milestone where the decision was
+  implemented, which is this project's own stated convention. The
+  ADR/learning-journal/CLAUDE.md-milestone-marker gap was caught, not
+  silently left; the backfilled ADR notes this explicitly.

@@ -75,7 +75,7 @@ describe('SessionGuard', () => {
     expect(request.user?.id).toBe('user-1');
     // sessionId is the session row's own id, not the raw cookie token:
     // CsrfGuard needs this specific value to recompute the expected
-    // CSRF token. See csrf.util.ts and ADR-0013.
+    // CSRF token. See csrf.util.ts and ADR-0014.
     expect(request.sessionId).toBe('session-1');
   });
 });

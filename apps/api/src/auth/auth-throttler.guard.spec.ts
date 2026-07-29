@@ -3,7 +3,7 @@ import { AuthThrottlerGuard } from './auth-throttler.guard';
 // AuthThrottlerGuard only overrides getTracker; the rest of its
 // behavior (counting, storage, throwing on limit) comes from
 // @nestjs/throttler's ThrottlerGuard and isn't re-tested here. See
-// ADR-0013 for why this guard exists at all: the Next.js reverse proxy
+// ADR-0014 for why this guard exists at all: the Next.js reverse proxy
 // doesn't add a trustworthy X-Forwarded-For hop, so keying on req.ip
 // would be trivially bypassable by rotating the header, while keying on
 // the account actually being targeted (email) isn't.
@@ -23,7 +23,7 @@ describe('AuthThrottlerGuard.getTracker', () => {
     // case-sensitive (a plain `String @unique` column, no citext, no
     // normalization anywhere in the DTOs), confirmed by reading it
     // directly. Folding case here would bucket together two strings
-    // that findUnique() treats as different accounts. See ADR-0013.
+    // that findUnique() treats as different accounts. See ADR-0014.
     const key = await tracker().call(undefined, {
       body: { email: '  Demo@AgentTrace.dev  ' },
       ip: '203.0.113.5',

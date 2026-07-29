@@ -20,7 +20,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 // treat as two different accounts -- an inconsistency with what this
 // guard is actually meant to key on. Only trimming, not case-folding,
 // keeps the tracker's notion of "same target" matching auth's own,
-// rather than introducing a different, looser one. See ADR-0013.
+// rather than introducing a different, looser one. See ADR-0014.
 //
 // req.ip is only a fallback for a malformed/missing email, which can't
 // target a specific account through AuthService's lookup anyway; if
