@@ -17,6 +17,7 @@ const BCRYPT_SALT_ROUNDS = 10;
 export interface AuthResult {
   userId: string;
   token: string;
+  sessionId: string;
 }
 
 @Injectable()
@@ -37,7 +38,7 @@ export class AuthService {
     const tokenHash = hashToken(token);
     const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
 
-    const user = await this.prisma.$transaction(async (tx) => {
+    const { user, session } = await this.prisma.$transaction(async (tx) => {
       const organization = await tx.organization.create({
         data: { name: dto.orgName, slug: orgSlug },
       });
@@ -50,14 +51,14 @@ export class AuthService {
         data: { orgId: organization.id, userId: user.id, role: Role.OWNER },
       });
 
-      await tx.session.create({
+      const session = await tx.session.create({
         data: { userId: user.id, tokenHash, expiresAt },
       });
 
-      return user;
+      return { user, session };
     });
 
-    return { userId: user.id, token };
+    return { userId: user.id, token, sessionId: session.id };
   }
 
   async login(dto: LoginDto): Promise<AuthResult> {
@@ -75,11 +76,11 @@ export class AuthService {
     const tokenHash = hashToken(token);
     const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
 
-    await this.prisma.session.create({
+    const session = await this.prisma.session.create({
       data: { userId: user.id, tokenHash, expiresAt },
     });
 
-    return { userId: user.id, token };
+    return { userId: user.id, token, sessionId: session.id };
   }
 
   async logout(token: string): Promise<void> {

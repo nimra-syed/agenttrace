@@ -52,7 +52,9 @@ describe('AuthService', () => {
                 ),
             },
             membership: { create: jest.fn().mockResolvedValue({}) },
-            session: { create: jest.fn().mockResolvedValue({}) },
+            session: {
+              create: jest.fn().mockResolvedValue({ id: 'session-1' }),
+            },
           };
           return callback(tx);
         },
@@ -68,6 +70,10 @@ describe('AuthService', () => {
       expect(result.userId).toBe('user-1');
       expect(typeof result.token).toBe('string');
       expect(result.token.length).toBeGreaterThan(20);
+      // The session row's own id, not the raw token: CsrfGuard needs
+      // this to recompute the expected CSRF token on later requests.
+      // See csrf.util.ts and ADR-0013.
+      expect(result.sessionId).toBe('session-1');
     });
 
     it('rejects signup with an email that is already registered', async () => {
@@ -92,7 +98,7 @@ describe('AuthService', () => {
         email: 'demo@agenttrace.dev',
         passwordHash,
       });
-      prisma.session.create.mockResolvedValue({});
+      prisma.session.create.mockResolvedValue({ id: 'session-1' });
 
       const result = await authService.login({
         email: 'demo@agenttrace.dev',
@@ -101,6 +107,7 @@ describe('AuthService', () => {
 
       expect(result.userId).toBe('user-1');
       expect(prisma.session.create).toHaveBeenCalled();
+      expect(result.sessionId).toBe('session-1');
     });
 
     it('rejects a wrong password and an unknown email with the same error', async () => {

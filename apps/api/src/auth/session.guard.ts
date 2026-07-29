@@ -57,6 +57,10 @@ export class SessionGuard implements CanActivate {
     };
 
     (request as Request & { user: AuthenticatedUser }).user = authenticatedUser;
+    // The session row's own id, not the raw token: CsrfGuard needs a
+    // stable, non-sensitive value to recompute the expected CSRF token
+    // against on every request. See csrf.util.ts.
+    (request as Request & { sessionId: string }).sessionId = session.id;
     return true;
   }
 }

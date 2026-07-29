@@ -42,14 +42,77 @@ async function redirectToLogin(): Promise<void> {
   window.location.href = "/login";
 }
 
+const CSRF_COOKIE_NAME = "agenttrace_csrf";
+const CSRF_HEADER_NAME = "X-CSRF-Token";
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+// login/signup/logout are the only mutating routes that don't require
+// an existing session (they create or destroy one), so there's no CSRF
+// token to attach yet and no point bootstrapping one first -- this is
+// the frontend's equivalent of CsrfGuard's own request.user-based
+// exemption on the backend. See ADR-0013.
+const CSRF_EXEMPT_PATHS = new Set([
+  "/auth/login",
+  "/auth/signup",
+  "/auth/logout",
+]);
+
+// Not httpOnly on the server side specifically so this can read it. See
+// csrf.util.ts and ADR-0013 for why the cookie's value, not some
+// separately-stored token, is what gets echoed back as a header.
+function readCsrfCookie(): string | null {
+  if (typeof document === "undefined") return null; // server-rendered, no cookie jar to read
+  const prefix = `${CSRF_COOKIE_NAME}=`;
+  const match = document.cookie
+    .split("; ")
+    .find((entry) => entry.startsWith(prefix));
+  return match ? decodeURIComponent(match.slice(prefix.length)) : null;
+}
+
+// A singleton promise, not a fire-and-forget call after me() succeeds:
+// this makes the guarantee "a mutation never runs before a CSRF token
+// exists" hold regardless of component call order, rather than relying
+// on a specific sequence (me() succeeding, then some effect firing,
+// then the user happening to wait long enough before clicking
+// anything). Whichever mutating call happens first -- a proactive
+// warmup, or literally the first "create project" click -- triggers
+// and awaits this; every later mutating call awaits the same
+// already-resolved promise, effectively free. See ADR-0013.
+let csrfReadyPromise: Promise<void> | null = null;
+
+function ensureCsrfToken(): Promise<void> {
+  if (readCsrfCookie()) return Promise.resolve();
+  if (!csrfReadyPromise) {
+    csrfReadyPromise = request<void>("/auth/csrf").catch((error: unknown) => {
+      csrfReadyPromise = null; // let a later mutating call retry the bootstrap
+      throw error;
+    });
+  }
+  return csrfReadyPromise;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+
+  if (MUTATING_METHODS.has(method) && !CSRF_EXEMPT_PATHS.has(path)) {
+    await ensureCsrfToken();
+    const csrfToken = readCsrfCookie();
+    // If still missing after the bootstrap attempt (shouldn't happen,
+    // but not this client's job to guess why), proceed without the
+    // header and let the server's own 403 be the definitive signal,
+    // rather than throwing client-side on a guess.
+    if (csrfToken) headers[CSRF_HEADER_NAME] = csrfToken;
+  }
+
   const response = await fetch(`/api${path}`, {
     ...init,
+    method,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers,
   });
 
   if (response.status === 401) {
@@ -69,6 +132,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       message ?? `Request failed with status ${response.status}`,
     );
   }
+
+  // GET /auth/csrf (the bootstrap endpoint) returns 204 with no body.
+  if (response.status === 204) return undefined as T;
 
   return (await response.json()) as T;
 }
