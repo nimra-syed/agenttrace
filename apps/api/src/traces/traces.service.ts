@@ -1,16 +1,25 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import type { ListTracesResponse, TraceRecord } from '@agenttrace/shared-types';
+import type { Prisma } from '../../generated/prisma/client.js';
 import { TraceStatus } from '../../generated/prisma/client.js';
 import { toJsonInput } from '../common/json-input.util';
 import { toDateOrPassthrough } from '../common/optional-date.util';
 import { assertValidTimeRange } from '../common/validate-time-range.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProjectsService } from '../projects/projects.service';
+import { decodeCursor, encodeCursor } from './cursor.util';
 import { CreateTraceDto } from './dto/create-trace.dto';
+import { DEFAULT_LIMIT, ListTracesDto } from './dto/list-traces.dto';
+import { toTraceRecord } from './trace-record.mapper';
 
 @Injectable()
 export class TracesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectsService: ProjectsService,
+  ) {}
 
-  async upsert(projectId: string, dto: CreateTraceDto) {
+  async upsert(projectId: string, dto: CreateTraceDto): Promise<TraceRecord> {
     const startedAt = new Date(dto.startedAt);
     const endedAt = toDateOrPassthrough(dto.endedAt);
     assertValidTimeRange(startedAt, endedAt);
@@ -37,16 +46,17 @@ export class TracesService {
     };
 
     if (!dto.externalTraceId) {
-      return this.prisma.trace.create({
+      const trace = await this.prisma.trace.create({
         data: {
           projectId,
           status: dto.status ?? TraceStatus.RUNNING,
           ...sharedData,
         },
       });
+      return toTraceRecord(trace);
     }
 
-    return this.prisma.trace.upsert({
+    const trace = await this.prisma.trace.upsert({
       where: {
         projectId_externalTraceId: {
           projectId,
@@ -64,6 +74,7 @@ export class TracesService {
         ...sharedData,
       },
     });
+    return toTraceRecord(trace);
   }
 
   // Used by SpansService to confirm a traceId in a URL actually belongs to
@@ -77,5 +88,67 @@ export class TracesService {
       throw new NotFoundException('Trace not found');
     }
     return trace;
+  }
+
+  // Session-authenticated (a person viewing a dashboard), not API-key
+  // authenticated, so projectId comes from the URL and has to be
+  // checked against the caller's org, same as every other
+  // /projects/:projectId/... route.
+  async list(
+    orgId: string,
+    projectId: string,
+    query: ListTracesDto,
+  ): Promise<ListTracesResponse> {
+    await this.projectsService.findOwnedProject(orgId, projectId);
+
+    const limit = query.limit ?? DEFAULT_LIMIT;
+
+    const startedAtFilter: Prisma.DateTimeFilter | undefined =
+      query.from || query.to
+        ? {
+            gte: query.from ? new Date(query.from) : undefined,
+            lte: query.to ? new Date(query.to) : undefined,
+          }
+        : undefined;
+
+    const where: Prisma.TraceWhereInput = {
+      projectId,
+      status: query.status,
+      agentName: query.agentName
+        ? { contains: query.agentName, mode: 'insensitive' }
+        : undefined,
+      startedAt: startedAtFilter,
+    };
+
+    // Keyset pagination: "give me the next rows older than this exact
+    // (startedAt, id) I already saw," expressed as an OR of two
+    // conditions, since Prisma has no direct row-value comparison
+    // syntax. This is ANDed with every filter above, it only narrows
+    // which page we're on, it doesn't change what's being filtered for.
+    if (query.cursor) {
+      const cursor = decodeCursor(query.cursor);
+      where.OR = [
+        { startedAt: { lt: cursor.startedAt } },
+        { startedAt: cursor.startedAt, id: { lt: cursor.id } },
+      ];
+    }
+
+    // Fetch one extra row, past the page size, purely to know whether a
+    // next page exists, without a separate count query.
+    const rows = await this.prisma.trace.findMany({
+      where,
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+    });
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const lastRow = page[page.length - 1];
+
+    return {
+      items: page.map(toTraceRecord),
+      nextCursor:
+        hasMore && lastRow ? encodeCursor(lastRow.startedAt, lastRow.id) : null,
+    };
   }
 }

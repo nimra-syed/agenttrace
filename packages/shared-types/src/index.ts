@@ -74,6 +74,27 @@ export interface TraceRecord {
   createdAt: string;
 }
 
+// The query params GET /projects/:projectId/traces accepts.
+export interface ListTracesQuery {
+  status?: TraceStatus;
+  agentName?: string;
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+// What GET /projects/:projectId/traces returns. An explicit shape, not
+// a raw array of Prisma models: cursor pagination needs somewhere to put
+// nextCursor, and Prisma's Decimal/Date types need converting to the
+// plain number/string wire format TraceRecord already promises (Decimal
+// serializes to a JSON string by default, not a number, a real, latent
+// mismatch this endpoint's mapper exists specifically to avoid).
+export interface ListTracesResponse {
+  items: TraceRecord[];
+  nextCursor: string | null;
+}
+
 // What POST /traces/:traceId/spans returns.
 export interface SpanRecord {
   id: string;

@@ -34,6 +34,32 @@ describe('SpansService', () => {
     startedAt: '2026-01-01T00:00:00.000Z',
   };
 
+  function fakeSpanRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'span-1',
+      traceId: 'trace-1',
+      externalSpanId: null,
+      parentSpanId: null,
+      name: 'call-llm',
+      type: 'LLM',
+      status: 'SUCCESS',
+      input: null,
+      output: null,
+      model: null,
+      provider: null,
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      error: null,
+      startedAt: new Date('2026-01-01T00:00:00.000Z'),
+      endedAt: new Date('2026-01-01T00:01:00.000Z'),
+      durationMs: 60000,
+      metadata: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      ...overrides,
+    };
+  }
+
   describe('upsert', () => {
     it("rejects a trace that does not belong to the caller's project, before doing anything else", async () => {
       tracesService.findOwnedTrace.mockRejectedValue(
@@ -48,7 +74,7 @@ describe('SpansService', () => {
 
     it('creates a span when no parentSpanId is given', async () => {
       tracesService.findOwnedTrace.mockResolvedValue({ id: 'trace-1' });
-      prisma.span.create.mockResolvedValue({ id: 'span-1' });
+      prisma.span.create.mockResolvedValue(fakeSpanRow());
 
       await spansService.upsert('project-1', 'trace-1', baseDto);
 
@@ -108,7 +134,7 @@ describe('SpansService', () => {
         id: 'parent-span',
         traceId: 'trace-1',
       });
-      prisma.span.create.mockResolvedValue({ id: 'span-1' });
+      prisma.span.create.mockResolvedValue(fakeSpanRow());
 
       await spansService.upsert('project-1', 'trace-1', {
         ...baseDto,
@@ -133,7 +159,7 @@ describe('SpansService', () => {
 
     it('applies the RUNNING default on create, but not on update, when status is omitted', async () => {
       tracesService.findOwnedTrace.mockResolvedValue({ id: 'trace-1' });
-      prisma.span.upsert.mockResolvedValue({ id: 'span-1' });
+      prisma.span.upsert.mockResolvedValue(fakeSpanRow());
 
       await spansService.upsert('project-1', 'trace-1', {
         ...baseDto,

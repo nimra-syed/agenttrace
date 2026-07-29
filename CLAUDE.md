@@ -95,6 +95,18 @@ from documentation alone. Confirmed working end to end (`SUCCESS` and
 `gemini-3-flash-preview` (no verified pricing yet), so `costUsd` is
 `undefined` for it rather than guessed.
 
+`GET /projects/:projectId/traces` (`ProjectTracesController`) lists
+traces for the dashboard, session-authenticated, separate from the
+API-key-authenticated `TracesController`, see ADR-0011. Cursor
+pagination orders by `(startedAt DESC, id DESC)`, both fields, not
+`startedAt` alone, since ties on `startedAt` are possible and need a
+deterministic tiebreaker. Every trace/span endpoint (ingestion and
+listing) maps its Prisma row through `toTraceRecord` /
+`toSpanRecord` before returning it, never a raw Prisma row: Prisma's
+`Decimal` (`totalCostUsd`, `costUsd`) serializes to a JSON *string* by
+default, confirmed live, not the `number` `TraceRecord`/`SpanRecord`
+promise.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually

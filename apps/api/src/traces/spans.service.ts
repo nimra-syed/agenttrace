@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import type { SpanRecord } from '@agenttrace/shared-types';
 import { SpanStatus } from '../../generated/prisma/client.js';
 import { toJsonInput } from '../common/json-input.util';
 import { toDateOrPassthrough } from '../common/optional-date.util';
 import { assertValidTimeRange } from '../common/validate-time-range.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSpanDto } from './dto/create-span.dto';
+import { toSpanRecord } from './span-record.mapper';
 import { TracesService } from './traces.service';
 
 @Injectable()
@@ -14,7 +16,11 @@ export class SpansService {
     private readonly tracesService: TracesService,
   ) {}
 
-  async upsert(projectId: string, traceId: string, dto: CreateSpanDto) {
+  async upsert(
+    projectId: string,
+    traceId: string,
+    dto: CreateSpanDto,
+  ): Promise<SpanRecord> {
     await this.tracesService.findOwnedTrace(projectId, traceId);
 
     const startedAt = new Date(dto.startedAt);
@@ -48,16 +54,17 @@ export class SpansService {
     };
 
     if (!dto.externalSpanId) {
-      return this.prisma.span.create({
+      const span = await this.prisma.span.create({
         data: {
           traceId,
           status: dto.status ?? SpanStatus.RUNNING,
           ...sharedData,
         },
       });
+      return toSpanRecord(span);
     }
 
-    return this.prisma.span.upsert({
+    const span = await this.prisma.span.upsert({
       where: {
         traceId_externalSpanId: { traceId, externalSpanId: dto.externalSpanId },
       },
@@ -72,6 +79,7 @@ export class SpansService {
         ...sharedData,
       },
     });
+    return toSpanRecord(span);
   }
 
   // parentSpanId must reference an already-ingested span (parent-first
