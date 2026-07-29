@@ -95,6 +95,47 @@ export interface ListTracesResponse {
   nextCursor: string | null;
 }
 
+// --- Auth and projects (used by apps/web, M7) ---
+
+export type MembershipRole = 'OWNER' | 'MEMBER';
+
+// The body of POST /auth/signup.
+export interface SignupPayload {
+  email: string;
+  password: string;
+  name: string;
+  orgName: string;
+}
+
+// The body of POST /auth/login.
+export interface LoginPayload {
+  email: string;
+  password: string;
+}
+
+// What GET /auth/me returns.
+export interface CurrentUser {
+  id: string;
+  email: string;
+  name: string;
+  orgId: string;
+  role: MembershipRole;
+}
+
+// What GET /projects returns items of, and POST /projects returns.
+export interface ProjectRecord {
+  id: string;
+  orgId: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+}
+
+// The body of POST /projects.
+export interface CreateProjectPayload {
+  name: string;
+}
+
 // What POST /traces/:traceId/spans returns.
 export interface SpanRecord {
   id: string;

@@ -44,6 +44,11 @@ export class AuthController {
     return { userId };
   }
 
+  // Public on purpose: logout's whole job is to end whatever session is
+  // present, valid or not. Requiring a valid session to log out means a
+  // stale/expired cookie could never be cleared by calling this endpoint,
+  // which is exactly the case the frontend's 401 handler needs it for.
+  @Public()
   @HttpCode(200)
   @Post('logout')
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {

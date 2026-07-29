@@ -4,7 +4,7 @@ Observability and evaluation platform for AI agents — records an agent's
 LLM calls, tool calls, latency, token usage, cost, and errors as
 traces/spans, and presents them in a web dashboard.
 
-Status: early development (M6, reference AI agent done). See
+Status: early development (M7, dashboard listing agent runs done). See
 [`CLAUDE.md`](./CLAUDE.md) for architecture and conventions, and
 [`docs/adr/`](./docs/adr) for the reasoning behind major decisions.
 
@@ -133,6 +133,22 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/<model>:generateCo
   -H 'Content-Type: application/json' \
   -d '{"contents":[{"parts":[{"text":"Say OK"}]}]}'
 ```
+
+## Using the dashboard
+
+```bash
+pnpm dev:api   # http://localhost:3000
+pnpm dev:web   # http://localhost:3001 (or next free port)
+```
+
+Open the web app in a browser. Sign up, create a project, then create
+an API key for it (see "Trying API keys locally" above) and report a
+few traces (see "Trying trace ingestion locally" above) to see them on
+the project's runs page, with filters and pagination.
+
+See `docs/testing/m7-manual-browser-checklist.md` for the manual test
+pass this flow should get after any change touching `apps/web`,
+`proxy.ts`, or the auth endpoints.
 
 ## Commands
 

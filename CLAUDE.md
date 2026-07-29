@@ -107,6 +107,18 @@ listing) maps its Prisma row through `toTraceRecord` /
 default, confirmed live, not the `number` `TraceRecord`/`SpanRecord`
 promise.
 
+`apps/web` has its first real functionality as of M7: login/signup
+pages, a project list, and the runs dashboard, see ADR-0012.
+`next.config.ts` rewrites `/api/:path*` to the API so the browser sees
+one origin, avoiding CORS and `SameSite` cookie problems. `proxy.ts`
+(Next.js 16's renamed `middleware.ts`) does a cookie-presence check
+only, a convenience redirect; the real authentication check is the
+API's 401, handled centrally in `apps/web/src/lib/api.ts`. `POST
+/auth/logout` is `@Public()`, deliberately: it is called by the
+frontend's 401 handler before redirecting to `/login`, specifically to
+clear a stale cookie, so it must work even when the session it is
+clearing is already invalid.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -197,8 +209,10 @@ database needed for these.
 
 ## Current milestone
 
-M6 complete. Next: M7 — a dashboard listing agent runs, the first piece
-of the web app (apps/web) with real functionality.
+M7 complete: a dashboard listing agent runs (backend list endpoint plus
+the login/signup/projects/runs frontend), the first real functionality
+in `apps/web`. Verified with a manual browser test pass, see
+`docs/testing/m7-manual-browser-checklist.md`.
 
 ## Known technical debt
 
@@ -262,3 +276,7 @@ of the web app (apps/web) with real functionality.
   transient rate limit) on others, depending on the key's project and
   billing status. A `0` limit does not resolve by waiting; it means no
   free-tier allocation at all for that model on that project.
+- No Playwright/e2e test infrastructure yet (deferred to M11, per plan).
+  M7's frontend is covered by unit tests on the backend endpoint and a
+  manual browser checklist (`docs/testing/m7-manual-browser-checklist.md`),
+  not automated UI tests.

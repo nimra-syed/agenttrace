@@ -1,5 +1,153 @@
 # Learning Journal
 
+## M7 — Dashboard: list agent runs (2026-07-29)
+
+### What I built
+
+- `GET /projects/:projectId/traces` (`ProjectTracesController`), a
+  session-authenticated list endpoint with cursor pagination ordered by
+  `(startedAt DESC, id DESC)`, and filters for status, agent name
+  (partial match), and a date range.
+- `ListTracesResponse` (`{ items, nextCursor }`) in `packages/shared-types`,
+  an explicit response contract instead of a raw Prisma model.
+- `apps/web`'s first real functionality: login and signup pages, a
+  project list with inline creation, and the runs dashboard (filters
+  synced to the URL, a table, cursor-based "Load more" pagination).
+- A same-origin reverse proxy (`next.config.ts` rewrites) so the
+  browser never has to deal with cross-origin cookies, and `proxy.ts`
+  (Next.js 16's renamed `middleware.ts`) doing a cookie-presence-only
+  convenience redirect, not real authentication.
+- Along the way: found and fixed a real Prisma `Decimal`-serializes-as-
+  a-JSON-string bug affecting every trace/span endpoint, not just the
+  new one, and a real expired-session redirect loop caught only through
+  manual browser testing.
+
+### What I learned
+
+- Prisma's `Decimal` type serializes to JSON as a **string**
+  (`"12.34"`), not a `number`, even though the documented wire type
+  (`TraceRecord.totalCostUsd: number`) had promised a number since M5.
+  This had been true and untriggered since the M4 ingestion endpoints
+  shipped; nothing surfaced it until building a second endpoint forced
+  a direct comparison between what the type said and what the database
+  driver actually produced. Confirmed with a standalone script first,
+  then live over a real HTTP response, before touching any code.
+- `startedAt` alone is not a safe sort key for cursor pagination once
+  more than one row can share a timestamp. The fix isn't exotic:
+  sort and compare on `(startedAt, id)` as a compound key, breaking
+  ties with something that only needs to be stable and unique, not
+  meaningfully ordered.
+- Next.js 16 renamed the `middleware.ts` file convention to `proxy.ts`
+  (and the exported function from `middleware` to `proxy`). This
+  wasn't something to infer from prior Next.js experience; it only
+  showed up as a real build failure pointing at Next's own migration
+  docs. A framework's file-based conventions are exactly the kind of
+  thing a version bump can silently break.
+- A convenience check and a real check can actively fight each other if
+  they don't agree on what "signed out" means. `proxy.ts` treats
+  "cookie present" as "signed in." The API's real 401 handler treats
+  "cookie present but server-invalid" as "signed out" and redirects to
+  `/login`. Because `proxy.ts` can't tell those two cases apart, it
+  bounced `/login` straight back to `/projects`, which 401'd again,
+  forever. This is a category of bug that unit tests and typechecks
+  cannot catch at all: it only exists in the interaction between two
+  files, triggered by a specific stateful condition (a stale cookie),
+  and it only became visible by deliberately creating that condition in
+  a real browser and watching what actually happened. Reading either
+  file in isolation, both looked correct.
+- A route whose entire job is ending a session (`POST /auth/logout`)
+  must not itself require a *valid* session to run. Guarding it with
+  the same `SessionGuard` as every other route seemed consistent, but
+  it meant the one case logout exists to handle (an already-invalid
+  session) was exactly the case where calling logout failed.
+- Seeding realistic test data (varied statuses, agent names, and
+  timestamps, via direct API calls with a real API key) surfaced things
+  a single hand-typed test case wouldn't have: duration formatting only
+  looked right once a trace actually had `durationMs` set, since
+  nothing in the system derives it automatically from `startedAt`/
+  `endedAt`, it's whatever the client explicitly reports.
+
+### Decisions made
+
+- ADR-0011: the trace list endpoint's cursor pagination design, the
+  explicit response type, the Decimal serialization fix (extended to
+  the M4 ingestion endpoints in the same checkpoint since it turned out
+  to be small), and the two-controller split (session vs. API-key auth).
+- ADR-0012: the frontend's same-origin proxy, `proxy.ts` as a
+  convenience-only check, TanStack Query for data fetching, URL-synced
+  filters, and the expired-session redirect loop bug found during
+  manual testing along with its fix.
+
+### Problems encountered and how we resolved them
+
+- Six existing unit tests broke once `upsert()` started returning a
+  mapped `TraceRecord`/`SpanRecord` instead of a raw Prisma row: their
+  mocks returned incomplete objects (`{ id: 'trace-1' }`) missing
+  `startedAt`, and the mapper's `.toISOString()` call threw on
+  `undefined`. Fixed by introducing shared, realistic fixture helpers
+  (`fakeTraceRow()`, `fakeSpanRow()`) instead of ad hoc partial mocks.
+- The expired-session redirect loop (see above). Reproduced deliberately
+  by expiring a session directly in the database while the browser kept
+  its cookie, confirmed via a rapid stream of `[HMR] connected` console
+  messages (the fingerprint of a tight redirect loop), fixed by having
+  the frontend's 401 handler call `/auth/logout` before navigating, and
+  by making that endpoint `@Public()` so it works on an already-invalid
+  session.
+- A test project I created via the browser ended up named "Test"
+  instead of the name I'd typed, almost certainly a Chrome autofill
+  suggestion accepted instead of my typed text landing in the field.
+  Not a product bug, worth remembering that automated browser
+  interaction can be misled by browser-level autofill in ways a human
+  clicking through the same form usually notices and corrects for.
+
+### Interview questions I should be able to answer
+
+- Why does Prisma's `Decimal` type need an explicit mapper before
+  returning it in an API response, and what would happen if you skipped
+  that step?
+- Why is `startedAt` alone not enough to order a cursor-paginated list
+  correctly, and what does adding `id` as a second sort key actually
+  fix?
+- What's the difference between the job `proxy.ts` does and the job the
+  API's 401 handler does, and why does the app need both instead of
+  just one of them?
+- Walk through exactly how the expired-session redirect loop happened,
+  step by step, and why neither file was wrong in isolation.
+- Why does `POST /auth/logout` need to be public, when almost every
+  other route in the API defaults to requiring a valid session?
+
+### Common mistakes engineers make here
+
+- Trusting a wire-format type declaration (`number`) without checking
+  what the underlying database driver actually puts on the wire for
+  that field, especially for `Decimal`/`BigInt`-like types that many
+  ORMs serialize specially.
+- Sorting a paginated list by a timestamp alone, assuming timestamps
+  are unique enough in practice, until two rows share one and a page
+  boundary silently duplicates or skips a row.
+- Treating a middleware/proxy cookie-presence check as if it were real
+  authentication, instead of clearly designating one layer as the
+  actual source of truth and the other as a pure UX convenience.
+- Guarding a logout endpoint with the same auth requirement as every
+  other route, without asking whether the one case it exists to handle
+  (an invalid session) is the exact case that guard would reject.
+- Assuming that because two pieces of code each look correct on their
+  own, their interaction must also be correct, instead of actually
+  exercising the interaction (here, a stale-but-present cookie) in a
+  real environment.
+
+### How this milestone improves my resume
+
+"Built a cursor-paginated dashboard list endpoint and its frontend
+(session-based auth, URL-synced filters, TanStack Query), and diagnosed
+a redirect loop caused by a convenience auth check and a real auth
+check disagreeing about session validity, catching it only through
+deliberate manual browser testing rather than typechecking or
+automated tests" is a specific, real claim about finding and fixing a
+bug that only exists in the interaction between two otherwise-correct
+pieces of code, a distinct skill from writing either piece correctly
+on its own.
+
 ## M6 — Reference AI agent (2026-07-28)
 
 ### What I built
