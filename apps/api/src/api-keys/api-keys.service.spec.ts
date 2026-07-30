@@ -10,6 +10,7 @@ describe('ApiKeysService', () => {
     apiKey: {
       create: jest.Mock;
       findUnique: jest.Mock;
+      findMany: jest.Mock;
       update: jest.Mock;
     };
   };
@@ -20,6 +21,7 @@ describe('ApiKeysService', () => {
       apiKey: {
         create: jest.fn(),
         findUnique: jest.fn(),
+        findMany: jest.fn(),
         update: jest.fn(),
       },
     };
@@ -49,7 +51,9 @@ describe('ApiKeysService', () => {
             id: 'key-1',
             name: 'local dev',
             keyPrefix: data.keyPrefix,
-            createdAt: new Date(),
+            revokedAt: null,
+            lastUsedAt: null,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
           });
         },
       );
@@ -66,6 +70,12 @@ describe('ApiKeysService', () => {
       );
       expect(result.key).toMatch(/^atr_/);
       expect(result.keyPrefix).toBe(result.key.slice(0, 12));
+      // The record shape (everything but the raw key) goes through the
+      // same mapper as the list endpoint: Date fields come back as ISO
+      // strings, not raw Prisma Date objects.
+      expect(result.createdAt).toBe('2026-01-01T00:00:00.000Z');
+      expect(result.revokedAt).toBeNull();
+      expect(result.lastUsedAt).toBeNull();
     });
 
     it("rejects creating a key for a project that does not belong to the caller's org", async () => {
@@ -77,6 +87,63 @@ describe('ApiKeysService', () => {
         apiKeysService.create('org-1', 'someone-elses-project', 'x'),
       ).rejects.toThrow(NotFoundException);
       expect(prisma.apiKey.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findAllForProject', () => {
+    it("rejects listing keys for a project outside the caller's org, before ever querying keys", async () => {
+      projectsService.findOwnedProject.mockRejectedValue(
+        new NotFoundException('Project not found'),
+      );
+
+      await expect(
+        apiKeysService.findAllForProject('org-1', 'someone-elses-project'),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.apiKey.findMany).not.toHaveBeenCalled();
+    });
+
+    it('never returns the raw key value, and maps Date fields to ISO strings', async () => {
+      projectsService.findOwnedProject.mockResolvedValue({
+        id: 'project-1',
+        orgId: 'org-1',
+      });
+      prisma.apiKey.findMany.mockResolvedValue([
+        {
+          id: 'key-1',
+          name: 'local dev',
+          keyPrefix: 'atr_abc12345',
+          revokedAt: null,
+          lastUsedAt: new Date('2026-01-02T00:00:00.000Z'),
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ]);
+
+      const result = await apiKeysService.findAllForProject(
+        'org-1',
+        'project-1',
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).not.toHaveProperty('key');
+      expect(result[0]).not.toHaveProperty('keyHash');
+      expect(result[0].createdAt).toBe('2026-01-01T00:00:00.000Z');
+      expect(result[0].lastUsedAt).toBe('2026-01-02T00:00:00.000Z');
+      expect(result[0].revokedAt).toBeNull();
+    });
+
+    it('returns an empty array for a project with no keys yet', async () => {
+      projectsService.findOwnedProject.mockResolvedValue({
+        id: 'project-1',
+        orgId: 'org-1',
+      });
+      prisma.apiKey.findMany.mockResolvedValue([]);
+
+      const result = await apiKeysService.findAllForProject(
+        'org-1',
+        'project-1',
+      );
+
+      expect(result).toEqual([]);
     });
   });
 

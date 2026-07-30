@@ -1,4 +1,7 @@
 import type {
+  ApiKeyRecord,
+  CreateApiKeyPayload,
+  CreateApiKeyResponse,
   CreateProjectPayload,
   CurrentUser,
   ListTracesQuery,
@@ -197,4 +200,27 @@ export function getTraceDetail(
   traceId: string,
 ): Promise<TraceDetailResponse> {
   return request(`/projects/${projectId}/traces/${traceId}`);
+}
+
+export function listApiKeys(projectId: string): Promise<ApiKeyRecord[]> {
+  return request(`/projects/${projectId}/api-keys`);
+}
+
+export function createApiKey(
+  projectId: string,
+  payload: CreateApiKeyPayload,
+): Promise<CreateApiKeyResponse> {
+  return request(`/projects/${projectId}/api-keys`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function revokeApiKey(
+  projectId: string,
+  keyId: string,
+): Promise<{ success: boolean }> {
+  return request(`/projects/${projectId}/api-keys/${keyId}`, {
+    method: "DELETE",
+  });
 }

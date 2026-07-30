@@ -2,6 +2,7 @@
 
 import type { TraceStatus } from "@agenttrace/shared-types";
 import { useInfiniteQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { RunFilters } from "@/components/run-filters";
@@ -36,7 +37,15 @@ export default function RunsPage() {
     <>
       <AppHeader />
       <main className="mx-auto max-w-5xl px-4 py-8">
-        <h1 className="mb-6 text-2xl font-semibold">Runs</h1>
+        <div className="mb-6 flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">Runs</h1>
+          <Link
+            href={`/projects/${params.projectId}/settings`}
+            className="text-sm text-gray-500 hover:underline"
+          >
+            Settings
+          </Link>
+        </div>
         <RunFilters />
         {isLoading && <p className="text-sm text-gray-600">Loading...</p>}
         {!isLoading && traces.length === 0 && (

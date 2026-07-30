@@ -136,6 +136,32 @@ export interface CreateProjectPayload {
   name: string;
 }
 
+// What GET /projects/:projectId/api-keys returns items of. Never the raw
+// key value, only createdAt/revokedAt/lastUsedAt need Date-to-ISO-string
+// mapping (toApiKeyRecord), same reasoning as every other record type
+// here: an explicit wire-format type, not a raw Prisma row exposed
+// as-is.
+export interface ApiKeyRecord {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+// The body of POST /projects/:projectId/api-keys.
+export interface CreateApiKeyPayload {
+  name: string;
+}
+
+// What POST /projects/:projectId/api-keys returns. The only point in a
+// key's lifetime where the raw value is available; every other response
+// shape for API keys (ApiKeyRecord) never includes it.
+export interface CreateApiKeyResponse extends ApiKeyRecord {
+  key: string;
+}
+
 // What GET /projects/:projectId/traces/:traceId returns (M8). Spans are
 // flat, ordered chronologically (startedAt asc, id asc as a
 // deterministic tiebreaker, same reasoning as the list endpoint's

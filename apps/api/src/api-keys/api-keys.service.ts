@@ -1,8 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import type {
+  ApiKeyRecord,
+  CreateApiKeyResponse,
+} from '@agenttrace/shared-types';
 import { hashToken } from '../common/hash-token.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';
 import { generateApiKey } from './api-key.util';
+import { toApiKeyRecord } from './api-key-record.mapper';
 
 @Injectable()
 export class ApiKeysService {
@@ -11,7 +16,11 @@ export class ApiKeysService {
     private readonly projectsService: ProjectsService,
   ) {}
 
-  async create(orgId: string, projectId: string, name: string) {
+  async create(
+    orgId: string,
+    projectId: string,
+    name: string,
+  ): Promise<CreateApiKeyResponse> {
     await this.projectsService.findOwnedProject(orgId, projectId);
 
     const { fullKey, keyPrefix } = generateApiKey();
@@ -24,18 +33,18 @@ export class ApiKeysService {
     // The only point in this key's lifetime where the raw value is ever
     // available. It is not stored anywhere; the caller must save it now.
     return {
-      id: apiKey.id,
-      name: apiKey.name,
-      keyPrefix: apiKey.keyPrefix,
+      ...toApiKeyRecord(apiKey),
       key: fullKey,
-      createdAt: apiKey.createdAt,
     };
   }
 
-  async findAllForProject(orgId: string, projectId: string) {
+  async findAllForProject(
+    orgId: string,
+    projectId: string,
+  ): Promise<ApiKeyRecord[]> {
     await this.projectsService.findOwnedProject(orgId, projectId);
 
-    return this.prisma.apiKey.findMany({
+    const rows = await this.prisma.apiKey.findMany({
       where: { projectId },
       select: {
         id: true,
@@ -47,6 +56,8 @@ export class ApiKeysService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    return rows.map(toApiKeyRecord);
   }
 
   async revoke(orgId: string, projectId: string, keyId: string) {
