@@ -1,5 +1,142 @@
 # Learning Journal
 
+## M11 — Playwright end-to-end tests and CI database (2026-07-30)
+
+### What I built
+
+- Four Playwright specs (`apps/web/e2e/`): auth (signup, logout, the
+  signed-out redirect), project creation, API-key management, and one
+  narrow trace-ingestion smoke test — sign up and create a project and
+  an API key via requests, POST a real trace and span through the
+  public ingestion API, then verify the actual browser shows both on
+  the runs page and its detail page.
+- A new CI job with its first real, isolated, disposable Postgres
+  service container, running the whole suite against production
+  builds of both apps, with health polling, server-log capture, and
+  Playwright report/trace artifacts on failure.
+
+### What I learned
+
+- CORS is a browser-page restriction, not an HTTP-client restriction —
+  and I only actually confirmed this by hitting it. While debugging a
+  test failure, I tried reproducing the ingestion call from inside a
+  real browser tab's JavaScript console and got a `Failed to fetch`
+  CORS error calling the API's own origin directly. That's real, but
+  it's irrelevant to what Playwright's `request` fixture does: it's
+  Playwright's own Node-based HTTP client, running outside any
+  browser page context, so it was never subject to CORS in the first
+  place, the same way curl never is. I had the right design already;
+  what I didn't have yet was a clean way to prove it, and the wrong
+  debugging method momentarily made a correct design look suspect.
+- A local "it works on my machine" pass and a real CI run are
+  different claims, even when I deliberately reproduce CI's production
+  build-and-start steps locally first. I did that reproduction and it
+  passed — and CI *still* found two more real bugs on the very first
+  push: a `start:prod` script pointing at a path that has never
+  existed (`dist/main` vs. the actual `dist/src/main.js`), and a typo
+  in my own workflow's placeholder `CSRF_SECRET` (`i` isn't a valid hex
+  character). Neither was something a more careful local dry-run would
+  have caught by construction — they were specifically about the gap
+  between "the command I typed locally" and "the exact environment and
+  script GitHub Actions actually runs." The lesson isn't "simulate CI
+  more" so much as "a green local dry-run narrows the search space, it
+  doesn't close it — the actual CI run is still the real test."
+- A script that ships in every `nest new` scaffold and has apparently
+  never been questioned (`start:prod`) can be silently wrong for years
+  in a project that never happens to run it — this repo has always used
+  `nest start`/`--watch` for dev, so `node dist/main` had no chance to
+  fail until something (this milestone) finally called it. "It's the
+  framework's own default" is not the same claim as "it's been
+  verified against this project's actual build output."
+- `BrowserContext.request` sharing a cookie jar with `page` isn't just
+  a convenience API, it's the mechanism that makes API-based test setup
+  actually correct: cookies are scoped to the origin that issued them,
+  so the setup calls have to go through the same origin (the Next.js
+  proxy) the browser will later navigate to, not the API's own origin
+  directly. Getting this backwards would have been a bug that only
+  shows up as "the session doesn't exist," not as an obvious error at
+  the point of the mistake.
+
+### Decisions made
+
+- ADR-0015: the four-spec scope, API-request-based setup (not UI, not
+  the SDK, not direct DB writes) with the `context.request`
+  cookie-sharing mechanism and the proxy-vs-direct origin choice for
+  setup calls versus ingestion calls, unique/tagged test data with no
+  automated cleanup, and the CI job's isolated database, fixed CI-only
+  credentials, explicit port for `next start`, bounded health polling,
+  failure-artifact capture, and single-worker execution — each with its
+  own stated reasoning, not just "because that's how Playwright docs
+  show it."
+
+### Problems encountered and how we resolved them
+
+- `trace-smoke.spec.ts` failed on its first run with a bare "Internal
+  Server Error" page. Traced to a stale Turbopack dev-server module
+  cache — installing `@playwright/test` as a new dependency while
+  `next dev` was already running invalidated its cache without it
+  noticing. Confirmed via the browser's own console diagnostic (which
+  explicitly suggested a stale-cache cause), not guessed; fixed by
+  restarting the dev server. Not a real application bug.
+- `apps/api`'s `start:prod` script (`node dist/main`) failed with
+  `MODULE_NOT_FOUND` the first time it was ever run, in a local
+  production-mode dry run before even reaching CI. Root cause:
+  `tsconfig.json` has no `rootDir`, needed because `prisma.config.ts`
+  lives outside `src/`, so TypeScript's inferred output root includes
+  the whole `apps/api/` directory, putting the compiled entry point at
+  `dist/src/main.js`. Fixed the script, re-verified a full
+  production-mode start locally, then again for real in CI.
+- The CI workflow's own placeholder `CSRF_SECRET` value failed the same
+  startup validation a real invalid secret would (ADR-0014) — a typo
+  (`i` at the end isn't valid hex), caught on the very first real CI
+  run, not locally, since I hadn't actually run the startup validator
+  against that literal string before pushing. Fixed and specifically
+  re-verified against the real `validateCsrfSecret` function before
+  pushing again, then confirmed against a second real CI run.
+
+### Interview questions I should be able to answer
+
+- Why is Playwright's `request` fixture not subject to CORS, when a
+  `fetch()` call from inside a real page would be?
+- Why does test setup use `context.request` specifically, not the
+  plain global `request` fixture, and what would break if you got that
+  wrong?
+- Why do the setup calls in `trace-smoke.spec.ts` go through the Next.js
+  proxy while the ingestion calls hit the API directly — what's the
+  actual reasoning, not just "that's what the code does"?
+- What did reproducing CI's build-and-start steps locally actually
+  catch, and what did it *not* catch that the real CI run still found?
+- Why did `apps/api`'s `start:prod` script silently point at a
+  nonexistent path for the entire life of this project until now?
+
+### Common mistakes engineers make here
+
+- Debugging a CORS-flavored error by reasoning about server-side CORS
+  configuration, without first checking whether the client making the
+  request is even subject to CORS in the first place (a browser page's
+  JS is; a Node-based test runner or curl is not).
+- Treating a green local dry-run of CI's exact commands as equivalent
+  to a real CI run, instead of as evidence that narrows what's left to
+  find, not proof nothing's left.
+- Trusting a framework-scaffolded script (`start:prod`, `package.json`
+  defaults from `nest new`) as correct by virtue of being the
+  framework's own default, without checking it against this specific
+  project's actual build configuration.
+- Writing a "this doesn't need to be a real secret" placeholder value
+  for a CI environment variable without running it past the actual
+  validation logic it needs to satisfy.
+
+### How this milestone improves my resume
+
+"Stood up Playwright e2e tests and CI's first real, isolated database,
+and caught two genuine bugs (a broken production-start script that had
+never once been run in this project's history, and an invalid
+placeholder secret in the CI workflow itself) specifically because the
+milestone's own definition of done included a real CI run, not just a
+passing local dry-run" is a concrete, specific claim about the
+difference between local verification and the real target environment
+actually being exercised.
+
 ## M10 — API key management UI (2026-07-29)
 
 ### What I built

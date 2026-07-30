@@ -172,6 +172,26 @@ confirm/cancel, not a native `confirm()` dialog, both for UX and
 because a native dialog blocks the page (including this project's own
 browser-automation testing tools) until manually dismissed.
 
+M11 adds Playwright end-to-end tests (`apps/web/e2e/`) and CI's first
+real database, see ADR-0015. Test setup (signing up a user, creating a
+project and API key) goes through Playwright's request API, not the
+UI and not `packages/sdk` — specifically `context.request`, not the
+plain `request` fixture, since `BrowserContext.request` shares its
+cookie jar with any `page` opened from the same context, so the
+session/CSRF cookies `POST /auth/signup` sets land exactly where a
+later `page.goto()` will read them, no manual `Set-Cookie` parsing.
+These setup calls go through the Next.js proxy (`localhost:3001/api/...`),
+not the API directly, since the cookies are scoped to whichever origin
+issues them. Trace/span ingestion in the one seeded e2e flow hits the
+API directly (`localhost:3000`, no proxy), the opposite choice, and
+deliberately so: API-key auth uses a header, not cookies, and hitting
+the API directly is the more faithful representation of how a real
+script or the SDK actually calls it. `workers: 1` in
+`playwright.config.ts` is deliberate, not a default left alone: every
+test's data is independent, but all tests share one running `apps/api`
+process and one Postgres instance, including state (the throttler's
+in-memory store, ADR-0014) not yet verified safe under concurrency.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -199,7 +219,11 @@ pnpm db:down                   # stop local Postgres
 pnpm db:migrate                # run/create a Prisma migration (apps/api)
 pnpm db:seed                     # seed demo org/user/project (apps/api)
 pnpm db:studio                     # open Prisma Studio GUI (apps/api)
+pnpm --filter web test:e2e           # run Playwright e2e tests (apps/api and apps/web must already be running)
 ```
+
+The first time you run e2e tests locally, install the browser once:
+`pnpm --filter web exec playwright install --with-deps chromium`.
 
 Local Postgres (once `pnpm db:up` is running):
 `postgresql://agenttrace:agenttrace_dev_password@localhost:5433/agenttrace`
@@ -210,13 +234,27 @@ with it.)
 
 ## Testing expectations
 
-Unit tests (Jest, both apps), API integration tests (NestJS + Postgres),
-Playwright end-to-end tests once the dashboard has real flows to test.
-Full integration/e2e test infrastructure (a real test database in CI) is
-still planned for M11, but security-sensitive logic gets unit tests as
-soon as it exists, not deferred until M11. `AuthService` (signup/login)
-already has unit tests as of M2, using a mocked `PrismaService`, no test
-database needed for these.
+Unit tests (Jest, both apps) for backend logic — security-sensitive
+logic gets these as soon as it exists, never deferred. `AuthService`
+(signup/login) already has unit tests as of M2, using a mocked
+`PrismaService`, no test database needed for these.
+
+Playwright end-to-end tests (`apps/web/e2e/`, M11, ADR-0015) cover the
+backbone flows: auth, project creation, API-key management, and one
+trace ingested through the real public API end to end. CI now has a
+real, isolated, disposable Postgres (a `services:` container, fresh
+per job run) to run these against — the same database this milestone
+set up as a shared prerequisite, not something only the e2e suite
+benefits from. Locally, e2e tests expect `pnpm db:up` / `dev:api` /
+`dev:web` already running; they don't manage server lifecycle
+themselves.
+
+Still open, not part of M11: a NestJS-level API integration test suite
+(`apps/api/test/*.e2e-spec.ts`, Jest + `supertest`, no browser) is a
+different test category `nest new` scaffolded back at M0 and nothing
+has built out since — it would use the same CI database M11 just
+introduced, but building it out was explicitly kept out of this
+milestone's scope.
 
 ## Security rules
 
@@ -283,16 +321,18 @@ database needed for these.
 
 ## Current milestone
 
-M10 complete: an API key management UI (create, list, revoke), the
-first frontend for `ApiKeysController` (M3). No new ADR: unlike M7-M9,
-this milestone applied existing patterns (the Date-to-ISO-string mapper
-convention, session-authenticated CRUD, CSRF-protected mutations) to a
-new surface rather than making a new architectural decision — judged
-deliberately, not skipped. M9 (CSRF protection and login/signup rate
-limiting, ADR-0014) and M8 (trace detail view with a span waterfall,
-ADR-0013) are also complete. All three verified with live manual
-testing, not just unit tests — see each milestone's learning journal
-entry for the specific live checks run.
+M11 complete: Playwright end-to-end tests and CI's first real database
+(ADR-0015). Verified against the actual CI environment, not just
+locally — the first push surfaced two real bugs a purely-local
+verification pass would not have caught: `apps/api`'s `start:prod`
+script pointed at a build output path that has never existed
+(`node dist/main` vs. the real `dist/src/main.js`, since this project's
+`tsconfig.json` has no `rootDir`), and the workflow's own placeholder
+`CSRF_SECRET` value had a typo making it invalid hex. Both fixed and
+re-verified against a real GitHub Actions run before considering the
+milestone done. M10 (API key management UI), M9 (CSRF protection and
+login/signup rate limiting, ADR-0014), and M8 (trace detail view with a
+span waterfall, ADR-0013) are also complete.
 
 ## Known technical debt
 
@@ -356,12 +396,37 @@ entry for the specific live checks run.
   transient rate limit) on others, depending on the key's project and
   billing status. A `0` limit does not resolve by waiting; it means no
   free-tier allocation at all for that model on that project.
-- No Playwright/e2e test infrastructure yet (deferred to M11, per plan).
-  M7's frontend is covered by unit tests on the backend endpoint and a
-  manual browser checklist (`docs/testing/m7-manual-browser-checklist.md`),
-  not automated UI tests. M8, M9, and M10's frontend changes were each
-  verified with live manual browser testing but have no checklist
-  document of their own yet.
+- M11's Playwright suite covers auth, project creation, API-key
+  management, and one trace-ingestion smoke flow, not the filters,
+  pagination, waterfall positioning, malformed-tree handling, or
+  payload-detail collapsing that M7/M8's manual checklists already
+  verified once. Each is a reasonably-scoped follow-up on its own, not
+  folded into the milestone that stood up e2e infrastructure for the
+  first time. M7's frontend still has a manual checklist
+  (`docs/testing/m7-manual-browser-checklist.md`); M8, M9, and M10's
+  frontend changes were each verified with live manual testing but have
+  no checklist document of their own.
+- No automated e2e test-data cleanup yet. Local Playwright runs against
+  the persistent dev database leave clearly-tagged rows
+  (`@e2e.agenttrace.test` emails, `E2E ...`-prefixed names) that a
+  person can spot and remove by hand; CI doesn't need this, since its
+  Postgres is destroyed at the end of every job run. See ADR-0015.
+- Playwright runs with `workers: 1`, not parallelized, since all tests
+  share one running `apps/api` process and one Postgres instance,
+  including state (the M9 rate-limiter's in-memory store) not yet
+  verified safe under concurrency. Revisiting this is a reasonable
+  future step once the suite is larger and that's been explicitly
+  checked, not a permanent constraint. See ADR-0015.
+- `apps/api/test/*.e2e-spec.ts` (NestJS's own Jest-based API
+  integration test stub, scaffolded by `nest new` at M0) remains
+  untouched. It's a different test category from Playwright and would
+  use the same CI database M11 introduced, but building it out was
+  explicitly kept out of this milestone's scope.
+- CI's `actions/checkout@v4`, `actions/setup-node@v4`, and
+  `pnpm/action-setup@v4` target a Node.js version GitHub has begun
+  deprecating (runs are currently force-upgraded to Node 24
+  automatically, so this isn't failing anything yet). Worth a version
+  bump at some point; not urgent enough to block M11 on it.
 - The span waterfall (M8) caps rendering depth at 50 levels; a real
   trace nested deeper than that would show a count of hidden spans
   rather than rendering them. Not expected in practice, a safety margin
