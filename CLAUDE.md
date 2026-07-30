@@ -157,6 +157,21 @@ and by a live login test), and folding case in the throttle key would
 bucket together requests that authentication treats as different
 accounts.
 
+M10 adds a frontend for API key management
+(`/projects/:projectId/settings`), the first UI for `ApiKeysController`
+(M3) — until now it was only ever exercised via curl or a raw browser
+`fetch`. `ApiKeyRecord`/`CreateApiKeyPayload`/`CreateApiKeyResponse`
+(`packages/shared-types`) and a `toApiKeyRecord` mapper bring API keys
+in line with every other endpoint's Date-to-ISO-string wire contract,
+the same gap M7 already closed for traces/spans. The raw key is shown
+exactly once, right after creation, dismissed by an explicit "Done"
+click, matching the backend's actual guarantee that it's never
+retrievable again — there is no "view again" affordance, because there
+couldn't correctly be one. Revoking a key uses an inline
+confirm/cancel, not a native `confirm()` dialog, both for UX and
+because a native dialog blocks the page (including this project's own
+browser-automation testing tools) until manually dismissed.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -268,13 +283,16 @@ database needed for these.
 
 ## Current milestone
 
-M9 complete: CSRF protection and login/signup rate limiting (ADR-0014),
-closing two gaps deliberately deferred since ADR-0005. M8 (trace detail
-view with a span waterfall, ADR-0013) is also complete. Both verified
-with live manual testing, not just unit tests — see the M9 learning
-journal entry for the specific live checks run (X-Forwarded-For
-spoofing, email-casing consistency, CSRF bootstrap recovery, missing-
-token rejection, redirect-loop re-verification).
+M10 complete: an API key management UI (create, list, revoke), the
+first frontend for `ApiKeysController` (M3). No new ADR: unlike M7-M9,
+this milestone applied existing patterns (the Date-to-ISO-string mapper
+convention, session-authenticated CRUD, CSRF-protected mutations) to a
+new surface rather than making a new architectural decision — judged
+deliberately, not skipped. M9 (CSRF protection and login/signup rate
+limiting, ADR-0014) and M8 (trace detail view with a span waterfall,
+ADR-0013) are also complete. All three verified with live manual
+testing, not just unit tests — see each milestone's learning journal
+entry for the specific live checks run.
 
 ## Known technical debt
 
@@ -341,8 +359,8 @@ token rejection, redirect-loop re-verification).
 - No Playwright/e2e test infrastructure yet (deferred to M11, per plan).
   M7's frontend is covered by unit tests on the backend endpoint and a
   manual browser checklist (`docs/testing/m7-manual-browser-checklist.md`),
-  not automated UI tests. M8 and M9's frontend changes were verified
-  with live manual browser testing each time but have no checklist
+  not automated UI tests. M8, M9, and M10's frontend changes were each
+  verified with live manual browser testing but have no checklist
   document of their own yet.
 - The span waterfall (M8) caps rendering depth at 50 levels; a real
   trace nested deeper than that would show a count of hidden spans

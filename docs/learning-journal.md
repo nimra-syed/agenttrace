@@ -1,5 +1,102 @@
 # Learning Journal
 
+## M10 — API key management UI (2026-07-29)
+
+### What I built
+
+- `/projects/:projectId/settings`, an `ApiKeysPanel` component: list,
+  create (with a one-time raw-key reveal), and revoke (with an inline
+  confirm/cancel, not a native dialog).
+- `ApiKeyRecord`/`CreateApiKeyPayload`/`CreateApiKeyResponse` in
+  `packages/shared-types`, plus a `toApiKeyRecord` mapper — the
+  API-keys endpoints had been returning raw object literals with `Date`
+  fields since M3, never brought in line with the Date-to-ISO-string
+  wire contract every other endpoint already has.
+- A real, live end-to-end proof that "Revoke" actually disables a key,
+  not just changes a status label: created a key, used its raw value
+  to authenticate a real ingestion call (succeeded), revoked it through
+  the UI, then reused the *same* raw value again (rejected, `401`).
+
+### What I learned
+
+- A working feature (`ApiKeysController`, since M3) can sit completely
+  unused by its own product for multiple milestones without anyone
+  noticing, simply because curl and a raw browser `fetch` were "good
+  enough" to keep testing other things. It took explicitly asking "does
+  a real UI exist for this" during M9's testing to surface that it
+  didn't.
+- I caught myself reaching for a module-level mutable variable as a
+  shortcut to avoid passing a prop one level down. It would have
+  worked for the single-tab, single-render case I was testing, but
+  breaks under anything else (concurrent renders, more than one panel
+  instance, React re-render ordering) — the kind of bug that wouldn't
+  show up in the exact manual test I was about to run, only later,
+  under different conditions. Caught by asking "what does this
+  variable actually need to be" rather than "does this pass the test
+  I'm about to run," and fixed by just threading the prop normally
+  before it ever shipped.
+- A native `confirm()` dialog is a real, structural cost, not just a
+  style preference: it blocks the page, including this project's own
+  browser-automation testing tools, until a human manually dismisses
+  it. Knowing I'd need to verify the revoke flow with those same tools
+  later in the same milestone was itself a reason to build the
+  confirmation as ordinary DOM state instead.
+- "The button says Revoked" and "the key stopped working" are two
+  different claims, and only testing the first one would have left the
+  actual security property (a revoked key can no longer authenticate)
+  completely unverified. Proving it required exercising the real
+  ingestion path with a real raw key, not just checking the settings
+  table's rendered state.
+
+### Decisions made
+
+- No new ADR this milestone, decided deliberately rather than skipped:
+  M10 applied several already-established patterns (the mapper
+  convention from ADR-0011, session-authenticated CRUD, CSRF-protected
+  mutations from ADR-0014) to a new UI surface, rather than making a
+  new architectural decision worth recording on its own.
+
+### Problems encountered and how we resolved them
+
+- Verifying that a revoked key's raw value actually fails would
+  normally mean typing that raw value into a curl command, which
+  would print it directly into this session's own visible output —
+  exactly the kind of secret-echoing this project's security rules
+  exist to prevent. Resolved by running the entire create-use-revoke-
+  reuse sequence inside a single browser-executed script, which only
+  ever returned HTTP status codes to my own output, never the key
+  itself.
+
+### Interview questions I should be able to answer
+
+- Why does the raw API key have no "view again" affordance in the UI,
+  and what would have to change server-side to add one?
+- Why is a native `confirm()` dialog a worse choice here than inline
+  confirm/cancel state, beyond visual preference?
+- What's the difference between verifying a UI's displayed state and
+  verifying the security property that state is supposed to represent?
+
+### Common mistakes engineers make here
+
+- Assuming a backend feature is "done" once its endpoints exist and
+  pass their own tests, without checking whether anything in the
+  actual product surface ever calls them.
+- Reaching for shared mutable state to avoid a small amount of prop
+  threading, which works for whatever specific case is being tested
+  right now and breaks under a slightly different one later.
+- Testing that a destructive action's UI reflects the new state (a
+  status label changes) without testing that the underlying capability
+  it represents was actually revoked.
+
+### How this milestone improves my resume
+
+"Built an API key management UI, including a live, end-to-end
+verification that revocation actually invalidates a key for real
+authentication (not just a status change in the interface), performed
+without ever exposing the raw credential in visible output" is a
+specific, concrete claim about verifying a security property directly,
+not just building a CRUD screen.
+
 ## M9 — CSRF protection and login/signup rate limiting (2026-07-29)
 
 ### What I built
