@@ -57,7 +57,7 @@ jobs:
       # password: this protects nothing real, the database is destroyed
       # at the end of this job. Still a genuine 64-hex-char value so it
       # passes the same startup validation a real one would (ADR-0014).
-      CSRF_SECRET: "e2e00000000000000000000000000000000000000000000000000000000ci"
+      CSRF_SECRET: "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
       API_URL: "http://localhost:3000"
     steps:
       - uses: actions/checkout@v4
