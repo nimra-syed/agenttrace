@@ -3,6 +3,10 @@ import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { validateCsrfSecret } from './auth/csrf.util';
+import {
+  validateEvalWorkerSecret,
+  validateEvalWorkerUrl,
+} from './evaluations/evaluation-worker.util';
 
 // Deliberately not calling app.set('trust proxy', ...) anywhere. Confirmed
 // live (see ADR-0014): the Next.js frontend's rewrite-based proxy
@@ -24,6 +28,8 @@ async function bootstrap() {
   // error the first time someone logs in.
   try {
     validateCsrfSecret(process.env.CSRF_SECRET);
+    validateEvalWorkerSecret(process.env.EVAL_WORKER_SECRET);
+    validateEvalWorkerUrl(process.env.EVAL_WORKER_URL);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);

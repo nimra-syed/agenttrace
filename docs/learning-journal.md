@@ -1,5 +1,155 @@
 # Learning Journal
 
+## M12 — LLM-as-judge evaluation (2026-07-30)
+
+### What I built
+
+- `apps/eval-worker`, a new stateless Python/FastAPI service, the first
+  non-TypeScript app in the monorepo. One endpoint, `POST /evaluate`:
+  build a prompt from a bounded evidence snapshot, ask Gemini for a
+  strict-JSON verdict, validate it, hand it back. Never touches
+  Postgres — `apps/api` owns authorization and persistence.
+- `EvaluationsModule` in `apps/api`: bounds and truncates a trace's
+  evidence (`MAX_SPANS = 20`, per-field and total character caps),
+  calls the worker over an internal `X-Internal-Secret`-authenticated
+  endpoint, and persists the result as an append-only `EvalResult` row
+  with the exact snapshot and an `evaluatorVersion`, not a
+  reconstruction of either.
+- A cost-containment throttle (`EvaluationThrottlerGuard`, keyed on
+  `userId:projectId`), a shared-fixture contract test that both
+  languages' test suites validate against, and sanitized, distinct
+  HTTP statuses (504/503/503/502/500) for every way the worker call can
+  fail, instead of one undifferentiated 500.
+- A narrow frontend: an Evaluate button on the trace detail page,
+  disabled while pending, friendly per-status error text, and the
+  append-only history rendered newest-first — no rubric config, model
+  selection, auto-evaluation, deletion, or comparison in this slice.
+
+### What I learned
+
+- `@nestjs/throttler`'s `ThrottlerGuard` applies *every* named
+  throttler registered in `ThrottlerModule.forRoot()` to any route it
+  guards, not just the one a route's own `@Throttle()` references —
+  confirmed by reading the library's actual `canActivate` source, not
+  assumed from the docs. A route's `@Throttle({evaluate: {...}})` only
+  supplies that one config's limit; it doesn't exempt the route from
+  every other registered name. This meant the new `'evaluate'` route
+  was silently also being checked against `'auth'`'s lower limit, and
+  `signup`/`login` were silently also being checked against
+  `'evaluate'`'s higher one, invisible only because the lower limit
+  always won first. `@SkipThrottle()` on both sides fixed it.
+- A live burst test is a bad way to verify an exact rate-limit
+  threshold. Firing a dozen rapid real requests to prove "the limit is
+  10, not 5" also produced real `503`s from Gemini itself under load,
+  which took extra time to untangle from the actual bug being
+  investigated. A deterministic integration test that boots a real
+  Nest app and asserts the exact threshold proved the same fact faster,
+  for free, and without depending on provider-side conditions I don't
+  control. I should reach for that first next time, not as a fallback.
+- `AbortSignal.timeout()` rejects with a `DOMException` named
+  `TimeoutError`, not the generic `AbortError` I expected — checked
+  empirically against this project's actual Node version with a small
+  throwaway script, not assumed from older reading. That distinction is
+  what let the client tell "the worker took too long" apart from "the
+  worker was unreachable" without guessing.
+- `google.genai`'s `ServerError` and `ClientError` both extend a common
+  `APIError` base — found by reading the installed package directly.
+  Catching `APIError` once covers both a `503` from Gemini being
+  overloaded and a `429` from quota exhaustion, which turned out to
+  matter for real: the frontend smoke test's live "provider
+  unavailable" responses were actually a genuine `429
+  RESOURCE_EXHAUSTED` on a shared free-tier key exhausted by a full
+  day's testing, not a transient outage, confirmed by calling the
+  Gemini API directly outside the app rather than guessing from the
+  symptom alone.
+- I wrote ADR-0016 late, after having already referenced "ADR-0016" by
+  name in a dozen code comments across two languages while implementing
+  the milestone. The comments were right about a decision that hadn't
+  actually been written down anywhere yet. Caught during review, not
+  before, a reminder that writing the ADR at the same time as the first
+  comment referencing it is safer than trusting to circle back later.
+
+### Decisions made
+
+- ADR-0016: the Python/FastAPI worker boundary, the internal shared
+  secret, the bounded evidence snapshot and its truncation rules,
+  append-only history with `evaluatorVersion`, the cost-containment
+  throttle (and the cumulative-named-throttler fix), no automatic retry
+  of the worker call, the sanitized error-boundary status mapping, and
+  cross-language contract testing.
+
+### Problems encountered and how we resolved them
+
+- `ThrottlerModule` is `@Global()`, and an earlier sketch of the
+  design had it registered once per feature module (`AuthModule` and
+  the new `EvaluationsModule` each calling `forRoot()`). Caught by
+  reading the compiled module source before it caused a live bug, not
+  after, and fixed by consolidating both named configs into one call in
+  `AppModule`.
+- Live-testing that consolidation fix (deliberately spending a few real
+  Gemini calls to verify a real architectural change, not just
+  reasoning about it) showed the throttle engaging at request 6, not
+  the configured 10, and five of the first several requests returning a
+  bare `500`. The `500`s turned out to be unrelated real `503`s from
+  Gemini under burst load; the request-6 throttle was the real bug
+  described above, fixed with `@SkipThrottle()` on both routes and
+  proven with a new integration test that fails without the fix and
+  passes with it.
+- The frontend's live smoke test got a real `503` four times in a row.
+  Rather than keep retrying blindly (which I'd already been corrected
+  on once this same milestone, for the throttle test), I checked the
+  actual cause with a small out-of-band script calling Gemini directly,
+  found a real `429 RESOURCE_EXHAUSTED` with an explicit retry-after
+  hint, waited for it, and when it was still exhausted, asked the user
+  how to proceed rather than keep guessing. They chose to accept the
+  live error-path verification plus a mocked success-path test as
+  sufficient, rather than burn more of a shared, already-exhausted
+  quota.
+
+### Interview questions I should be able to answer
+
+- Why build a separate Python service for this instead of adding an
+  endpoint to the existing NestJS API?
+- Why is the evidence snapshot bounded and truncated at the character
+  level, and why is truncated text never re-parsed as JSON afterward?
+- What does "append-only" actually buy you here, and what live
+  evidence did you see that it mattered, not just that it sounded
+  right?
+- Walk through exactly why two unrelated routes ended up sharing each
+  other's rate limits, and how the fix and its test work.
+- Why does an internal-secret mismatch surface as a `500` while a
+  provider failure surfaces as a `503`, given both are "the backend
+  failed"?
+
+### Common mistakes engineers make here
+
+- Registering a `@Global()` Nest module more than once across feature
+  modules, assuming the later import can't silently conflict with the
+  first.
+- Assuming a route's own `@Throttle()` config is a complete description
+  of what rate limits apply to it, without checking whether the guard
+  it uses also applies other named configs by default.
+- Verifying a rate limit's exact threshold by hammering a real,
+  paid, rate-limited endpoint instead of writing a deterministic test
+  that proves the same fact for free.
+- Collapsing every non-2xx response from an internal dependency into
+  one generic `500`, losing the ability to tell "try again later" apart
+  from "this is broken" apart from "we misconfigured something
+  ourselves."
+- Treating "the provider returned an error" as a single case, instead
+  of checking whether the client library's own exception hierarchy
+  already distinguishes categories worth handling differently.
+
+### How this milestone improves my resume
+
+"Designed a cross-language service boundary (NestJS to FastAPI) with a
+shared internal-auth secret, a bounded/truncated evidence payload, and
+a sanitized error-boundary mapping across both languages, then found
+and fixed a real rate-limiter bug in a well-known library by reading
+its source rather than assuming its documented behavior" is a specific,
+verifiable claim about system design and debugging discipline, not just
+"integrated an LLM API."
+
 ## M11 — Playwright end-to-end tests and CI database (2026-07-30)
 
 ### What I built

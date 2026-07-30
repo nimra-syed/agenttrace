@@ -4,6 +4,7 @@ import type {
   CreateApiKeyResponse,
   CreateProjectPayload,
   CurrentUser,
+  EvalResultRecord,
   ListTracesQuery,
   ListTracesResponse,
   LoginPayload,
@@ -222,5 +223,21 @@ export function revokeApiKey(
 ): Promise<{ success: boolean }> {
   return request(`/projects/${projectId}/api-keys/${keyId}`, {
     method: "DELETE",
+  });
+}
+
+export function listEvaluations(
+  projectId: string,
+  traceId: string,
+): Promise<EvalResultRecord[]> {
+  return request(`/projects/${projectId}/traces/${traceId}/evaluations`);
+}
+
+export function triggerEvaluation(
+  projectId: string,
+  traceId: string,
+): Promise<EvalResultRecord> {
+  return request(`/projects/${projectId}/traces/${traceId}/evaluate`, {
+    method: "POST",
   });
 }

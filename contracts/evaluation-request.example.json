@@ -1,0 +1,38 @@
+{
+  "trace": {
+    "name": "issue-investigation",
+    "agentName": "github-agent",
+    "status": "SUCCESS",
+    "input": "{\"issueUrl\":\"https://github.com/example/repo/issues/42\"}",
+    "output": "{\"rootCause\":\"Null pointer in the parser when input is empty\",\"resolution\":\"Add an empty-input guard before parsing\"}",
+    "error": null
+  },
+  "spans": [
+    {
+      "name": "fetch-issue",
+      "type": "TOOL",
+      "status": "SUCCESS",
+      "input": "{\"issueNumber\":42}",
+      "output": "{\"title\":\"Crash on empty input\",\"body\":\"App crashes when the input field is left blank.\"}",
+      "error": null
+    },
+    {
+      "name": "fetch-readme",
+      "type": "TOOL",
+      "status": "SUCCESS",
+      "input": null,
+      "output": "{\"readme\":\"# Example Repo\\nA small CLI parser.\"}",
+      "error": null
+    },
+    {
+      "name": "call-llm",
+      "type": "LLM",
+      "status": "SUCCESS",
+      "input": "{\"prompt\":\"Given this issue and README, find the root cause and propose a fix.\"}",
+      "output": "{\"rootCause\":\"Null pointer in the parser when input is empty\",\"resolution\":\"Add an empty-input guard before parsing\"}",
+      "error": null
+    }
+  ],
+  "truncated": false,
+  "omittedSpanCount": 0
+}

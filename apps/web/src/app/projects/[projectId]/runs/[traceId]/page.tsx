@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { CollapsiblePayload } from "@/components/collapsible-payload";
+import { EvaluationPanel } from "@/components/evaluation-panel";
 import {
   formatCost,
   formatDuration,
@@ -125,6 +126,13 @@ export default function TraceDetailPage() {
 
             <h2 className="mt-6 mb-2 text-lg font-semibold">Spans</h2>
             <SpanWaterfall trace={data.trace} spans={data.spans} />
+
+            <div className="mt-6">
+              <EvaluationPanel
+                projectId={params.projectId}
+                traceId={params.traceId}
+              />
+            </div>
           </>
         )}
       </main>

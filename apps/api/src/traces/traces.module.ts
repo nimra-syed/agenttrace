@@ -10,5 +10,7 @@ import { TracesService } from './traces.service';
   imports: [ProjectsModule],
   controllers: [TracesController, SpansController, ProjectTracesController],
   providers: [TracesService, SpansService],
+  // TracesService.findOwnedTrace is reused by EvaluationsModule.
+  exports: [TracesService],
 })
 export class TracesModule {}

@@ -31,6 +31,29 @@ jobs:
 
       - run: pnpm build
 
+  eval-worker:
+    runs-on: ubuntu-latest
+    # A separate job, not folded into lint-and-typecheck: apps/eval-worker
+    # is Python (ruff, pytest), not part of the pnpm workspace, so it
+    # needs its own toolchain setup. Same isolated-job reasoning as e2e.
+    defaults:
+      run:
+        working-directory: apps/eval-worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/eval-worker/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      - run: ruff check .
+
+      - run: python -m pytest
+
   e2e:
     runs-on: ubuntu-latest
     # A fresh Postgres per job run, destroyed when the job ends -- no

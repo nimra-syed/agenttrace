@@ -131,10 +131,38 @@ model Trace {
 
   project Project @relation(fields: [projectId], references: [id])
   spans   Span[]
+  evalResults EvalResult[]
 
   @@unique([projectId, externalTraceId])
   @@index([projectId, startedAt(sort: Desc)])
   @@index([projectId, status])
+}
+
+// One row per evaluation run, append-only: re-evaluating a trace adds a
+// new row rather than overwriting the last one, so score history over
+// time (e.g. after a prompt/rubric change) is preserved. See ADR-0016.
+//
+// evaluatorVersion + evaluationInput exist specifically so a historical
+// score is explicable later: judgeModel alone can't explain a score if
+// the rubric, the snapshot-builder's truncation logic, or the prompt
+// template changed since. evaluationInput is the exact bounded snapshot
+// actually sent to the judge for this row, not a reference to the
+// trace/spans as they exist now (which could themselves have drifted,
+// though they're effectively immutable post-ingestion today) or a
+// promise that it could be reconstructed later.
+model EvalResult {
+  id               String   @id @default(uuid())
+  traceId          String
+  score            Int
+  rationale        String
+  judgeModel       String
+  evaluatorVersion String
+  evaluationInput  Json
+  createdAt        DateTime @default(now())
+
+  trace Trace @relation(fields: [traceId], references: [id])
+
+  @@index([traceId])
 }
 
 model Span {

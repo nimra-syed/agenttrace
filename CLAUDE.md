@@ -192,12 +192,47 @@ test's data is independent, but all tests share one running `apps/api`
 process and one Postgres instance, including state (the throttler's
 in-memory store, ADR-0014) not yet verified safe under concurrency.
 
+M12 adds the evaluation platform's first slice: a way to ask an LLM to
+score a recorded trace. Built as a separate, stateless Python/FastAPI
+service (`apps/eval-worker`), not folded into `apps/api`, since the
+evaluation engine is a distinct responsibility likely to grow
+independently (Python-native evaluation libraries, its own scaling
+characteristics), see ADR-0016. `apps/api`'s `EvaluationsModule` owns
+authorization and persistence and calls the worker over one internal
+endpoint (`POST /evaluate`), authenticated with a shared secret
+(`EVAL_WORKER_SECRET`, distinct from `CSRF_SECRET` and API keys) sent as
+`X-Internal-Secret` and checked with a constant-time comparison on both
+sides. `buildEvaluationSnapshot()` bounds what evidence the judge ever
+sees (`MAX_SPANS = 20`, per-field and total character caps, truncation
+counted and reported, never re-parsed as JSON), and the rubric is worded
+so the judge scores only the evidence it's given. Every `EvalResult` row
+is append-only (re-evaluating a trace never overwrites an old score) and
+stores the exact bounded snapshot plus an `evaluatorVersion`, so a
+historical score's provenance never depends on the rubric or prompt
+logic's current content. `EvaluationThrottlerGuard` keys the
+cost-containment rate limit on `(userId, projectId)`, registered as a
+second named throttler (`'evaluate'`) alongside `'auth'` in the same
+central `ThrottlerModule.forRoot()` call, a real bug surfaced here:
+`ThrottlerGuard` applies every named throttler to any route it guards,
+not just the one a route's own `@Throttle()` references, so both routes
+needed an explicit `@SkipThrottle()` for the other's name. See ADR-0016.
+Every failure the worker call can hit (timeout, unreachable, a real
+provider error, a malformed response, an internal-secret mismatch) maps
+to a distinct, sanitized HTTP status (504, 503, 503, 502, 500) rather
+than one undifferentiated 500, and no raw exception message, provider
+response, or evidence content is ever included in a thrown message on
+either side. `apps/web`'s trace detail page gets an `EvaluationPanel`
+(an Evaluate button disabled while pending, friendly per-status error
+copy, and the append-only history newest-first), deliberately narrow:
+no configurable rubric, model selection, auto-evaluation, deletion,
+comparison, or raw evaluation-input display yet.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
   justify it.
-- TypeScript everywhere except a future FastAPI evaluation worker (Python),
-  introduced only when we build LLM-as-judge evaluation.
+- TypeScript everywhere except `apps/eval-worker` (Python/FastAPI), the
+  LLM-as-judge evaluation worker introduced at M12, see ADR-0016.
 - Shared types live in `packages/shared-types`, consumed via
   `workspace:*` — do not duplicate DTO shapes between `apps/web` and
   `apps/api`.
@@ -224,6 +259,10 @@ pnpm --filter web test:e2e           # run Playwright e2e tests (apps/api and ap
 
 The first time you run e2e tests locally, install the browser once:
 `pnpm --filter web exec playwright install --with-deps chromium`.
+
+`apps/eval-worker` (Python/FastAPI) is not part of the pnpm workspace
+and has its own setup, run, test, and lint commands, documented in
+`apps/eval-worker/README.md`.
 
 Local Postgres (once `pnpm db:up` is running):
 `postgresql://agenttrace:agenttrace_dev_password@localhost:5433/agenttrace`
@@ -255,6 +294,20 @@ different test category `nest new` scaffolded back at M0 and nothing
 has built out since — it would use the same CI database M11 just
 introduced, but building it out was explicitly kept out of this
 milestone's scope.
+
+`apps/eval-worker`'s own test suite (`apps/eval-worker/tests/`, pytest)
+never makes a real Gemini call, same reasoning as `apps/reference-agent`
+(ADR-0010): `app.judge.evaluate` is mocked in every test. A dedicated
+integration test (`apps/api/src/evaluations/throttler-scoping.integration.spec.ts`)
+boots a real Nest app to prove the exact named-throttler threshold for
+both `'auth'` and `'evaluate'`, specifically so this doesn't need
+re-verifying with real, paid, rate-limited live traffic every time.
+`apps/web/e2e/evaluation-panel.spec.ts` (M12) is the same story on the
+frontend: every case mocks the evaluate/evaluations routes via
+Playwright's `page.route()`, since a real evaluation is a real, paid LLM
+call that shouldn't run on every push. Both a real successful evaluation
+and several real provider failures were verified by hand in a live
+browser instead, see ADR-0016.
 
 ## Security rules
 
@@ -318,21 +371,57 @@ milestone's scope.
   rather than continuing to use it. Write secrets to files directly
   (e.g. via a script that never prints them) instead of echoing them to
   a terminal first.
+- Internal service-to-service calls (`apps/api` to `apps/eval-worker`)
+  authenticate with a distinct shared secret (`EVAL_WORKER_SECRET`, not
+  `CSRF_SECRET`, not an API key), sent as `X-Internal-Secret` and
+  checked with a constant-time comparison on both sides
+  (`crypto.timingSafeEqual` in Node, `hmac.compare_digest` in Python).
+  See ADR-0016.
+- `EVAL_WORKER_SECRET` (both services) and `GEMINI_API_KEY`
+  (`apps/eval-worker`) are validated at process startup, same fail-fast
+  discipline as `CSRF_SECRET`. See ADR-0016.
+- Every evaluation-worker failure (timeout, unreachable, a provider
+  error, a malformed response, an internal-secret mismatch) maps to a
+  distinct, sanitized HTTP status; no thrown message on either side ever
+  includes a raw exception message, provider response body, or evidence
+  content, since trace/span input/output can contain secrets or private
+  data. See ADR-0016.
+- `ThrottlerGuard` applies every named throttler registered in
+  `ThrottlerModule.forRoot()` to any route it guards, not just the one
+  referenced in that route's own `@Throttle()`. Adding a new named
+  throttler anywhere requires an explicit `@SkipThrottle()` on every
+  other already-throttled route, or it silently also becomes subject to
+  the new limit. Found live at M12 (the `'evaluate'` throttler was
+  silently also checked against `'auth'`'s lower limit, and vice versa);
+  see ADR-0016 and `throttler-scoping.integration.spec.ts`.
 
 ## Current milestone
 
-M11 complete: Playwright end-to-end tests and CI's first real database
-(ADR-0015). Verified against the actual CI environment, not just
-locally — the first push surfaced two real bugs a purely-local
-verification pass would not have caught: `apps/api`'s `start:prod`
-script pointed at a build output path that has never existed
-(`node dist/main` vs. the real `dist/src/main.js`, since this project's
-`tsconfig.json` has no `rootDir`), and the workflow's own placeholder
-`CSRF_SECRET` value had a typo making it invalid hex. Both fixed and
-re-verified against a real GitHub Actions run before considering the
-milestone done. M10 (API key management UI), M9 (CSRF protection and
-login/signup rate limiting, ADR-0014), and M8 (trace detail view with a
-span waterfall, ADR-0013) are also complete.
+M12 complete: LLM-as-judge evaluation, the first slice of the
+"evaluation" half of this project's stated purpose (ADR-0016). A
+separate stateless Python/FastAPI worker (`apps/eval-worker`), a
+bounded/truncated evidence snapshot, append-only reproducible evaluation
+history, a cost-containment throttle, sanitized cross-service error
+handling, and a narrow frontend (an Evaluate button and history list on
+the trace detail page, deliberately no rubric config, model selection,
+comparison, or deletion yet). A real bug was found and fixed during live
+throttle verification: `ThrottlerGuard` applies every named throttler to
+any route it guards, not just the one a route's own `@Throttle()`
+references, so `signup`/`login` and the new evaluate route each needed
+an explicit `@SkipThrottle()` for the other's limit. A real successful
+evaluation was verified live during the backend checkpoint, twice,
+producing different scores from real LLM non-determinism, demonstrating
+the append-only history. The frontend's own live verification instead
+exercised the error path for real: several genuine `429`/`503`
+responses from Gemini's free-tier quota, confirmed via a direct
+out-of-band call to be real quota exhaustion, not a code bug, rendering
+correctly through the new sanitized error mapping. The frontend's
+success-path rendering (score, rationale, judge model, evaluator
+version) was verified with a mocked Playwright test instead, once the
+live quota ran out, accepted as sufficient at the user's call. M11
+(Playwright end-to-end tests and CI's first real database, ADR-0015),
+M10 (API key management UI), and M9 (CSRF protection and login/signup
+rate limiting, ADR-0014) are also complete.
 
 ## Known technical debt
 
@@ -437,3 +526,27 @@ span waterfall, ADR-0013) are also complete.
   implemented, which is this project's own stated convention. The
   ADR/learning-journal/CLAUDE.md-milestone-marker gap was caught, not
   silently left; the backfilled ADR notes this explicitly.
+- M12's evaluation UI (`EvaluationPanel`) deliberately has no
+  configurable rubric, model selection, auto-evaluation trigger,
+  deletion, comparison across evaluations, or raw `evaluationInput`
+  display. Each is a reasonable, scoped follow-up, not part of this
+  milestone. See ADR-0016.
+- The paid-call-success/DB-write-failure window in
+  `EvaluationsService.evaluate` (a successful Gemini call whose result
+  then fails to persist) is accepted debt with no automatic recovery: no
+  queue or outbox, a person just re-clicks Evaluate. See ADR-0016.
+- `apps/eval-worker`'s `except genai_errors.APIError` handler
+  (`app/main.py`) does not log the underlying exception before
+  converting it to a sanitized 503. Confirmed live during M12's frontend
+  smoke test: several real `429 RESOURCE_EXHAUSTED` responses left no
+  diagnostic detail in the eval-worker's own log, only the generic
+  access-log line. Fine for what the browser sees, but makes real
+  operator debugging harder than it needs to be; worth a server-side-only
+  log line (never included in the HTTP response) in a future pass.
+- Gemini's free-tier quota (`generate_content_free_tier_requests`,
+  confirmed live at a limit of 20) is easy to exhaust during active
+  development, since `apps/eval-worker` and `apps/reference-agent`
+  currently share one API key (ADR-0010's original choice). A dedicated
+  key per service, or simply expecting to wait out the quota window
+  during heavy manual testing, are the two easy mitigations; neither is
+  implemented yet.

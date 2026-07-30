@@ -174,6 +174,30 @@ export interface TraceDetailResponse {
   spans: SpanRecord[];
 }
 
+// What POST /projects/:projectId/traces/:traceId/evaluate returns, and
+// what each item of a trace's evaluation history looks like. Append-only:
+// a trace can have many of these over time (ADR-0016).
+//
+// evaluationInput is the exact bounded evidence snapshot (trace fields
+// plus a capped set of span fields, truncated per apps/api's
+// snapshot-builder) that was actually sent to the judge for this
+// specific result -- not a reference to reconstruct later, the literal
+// input. Its shape is the EvaluationSnapshot contract in
+// apps/api/src/evaluations/, mirrored by apps/eval-worker's Pydantic
+// model and checked against the shared fixtures in /contracts. Typed
+// `unknown` here since shared-types has no reason to duplicate that
+// shape for the frontend, which only ever displays it as-is.
+export interface EvalResultRecord {
+  id: string;
+  traceId: string;
+  score: number;
+  rationale: string;
+  judgeModel: string;
+  evaluatorVersion: string;
+  evaluationInput: unknown;
+  createdAt: string;
+}
+
 // What POST /traces/:traceId/spans returns.
 export interface SpanRecord {
   id: string;

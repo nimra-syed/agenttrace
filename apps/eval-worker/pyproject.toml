@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff.lint]
+# B008 (function call in argument default) is a real footgun in general
+# Python, but FastAPI's dependency injection requires exactly this
+# pattern (Depends(...) as a parameter default) -- a standard, expected
+# exclusion for FastAPI codebases, not a case-by-case suppression.
+ignore = ["B008"]

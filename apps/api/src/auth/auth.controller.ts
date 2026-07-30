@@ -8,7 +8,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthThrottlerGuard } from './auth-throttler.guard';
 import { AuthService } from './auth.service';
@@ -33,9 +33,17 @@ const AUTH_THROTTLE = { auth: { limit: 5, ttl: 60000 } };
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // See EvaluationsController's evaluate() for why @SkipThrottle is
+  // needed here: ThrottlerGuard applies every named throttler in
+  // AppModule's config to any route it guards, not just the one named
+  // in @Throttle(). Without this, signup/login were also silently
+  // subject to the 'evaluate' config's limit: 10 using this guard's own
+  // email/IP tracker -- harmless only because 5 < 10 masked it. See
+  // ADR-0016.
   @Public()
   @UseGuards(AuthThrottlerGuard)
   @Throttle(AUTH_THROTTLE)
+  @SkipThrottle({ evaluate: true })
   @Post('signup')
   async signup(
     @Body() dto: SignupDto,
@@ -50,6 +58,7 @@ export class AuthController {
   @Public()
   @UseGuards(AuthThrottlerGuard)
   @Throttle(AUTH_THROTTLE)
+  @SkipThrottle({ evaluate: true })
   @HttpCode(200)
   @Post('login')
   async login(

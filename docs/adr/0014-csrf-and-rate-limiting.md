@@ -32,6 +32,18 @@ would need to exempt high-frequency ingestion routes to avoid breaking
 a busy agent's traffic, and that scope wasn't part of what this
 milestone set out to fix.
 
+Update, from M12: this is no longer accurate as written.
+`ThrottlerModule.forRoot()` now registers a second named throttler
+(`'evaluate'`, ADR-0016's cost-containment limit), and `@SkipThrottle()`
+now does appear on both `signup`/`login` and the evaluate route, each
+opting out of the other's config. See ADR-0016 for why this became
+necessary (`ThrottlerGuard` applies every registered named throttler to
+any route it guards, not just the one referenced in that route's own
+`@Throttle()`) and for the general rule going forward: adding a new
+named throttler anywhere in `AppModule` requires auditing every other
+throttled route for a matching `@SkipThrottle()`, not just adding the
+new route.
+
 #### Keyed on email, not IP
 
 Verified live before deciding this, not assumed: a debug endpoint was
