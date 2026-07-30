@@ -30,3 +30,121 @@ jobs:
       - run: pnpm test
 
       - run: pnpm build
+
+  e2e:
+    runs-on: ubuntu-latest
+    # A fresh Postgres per job run, destroyed when the job ends -- no
+    # shared volume with local dev, no shared state between CI runs.
+    # See ADR-0015.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agenttrace
+          POSTGRES_PASSWORD: agenttrace_test_password
+          POSTGRES_DB: agenttrace
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agenttrace"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: "postgresql://agenttrace:agenttrace_test_password@localhost:5432/agenttrace?schema=public"
+      # Fixed, committed, CI-only value -- not a secrets-hygiene
+      # exception. Same reasoning as docker-compose.yml's dev Postgres
+      # password: this protects nothing real, the database is destroyed
+      # at the end of this job. Still a genuine 64-hex-char value so it
+      # passes the same startup validation a real one would (ADR-0014).
+      CSRF_SECRET: "e2e00000000000000000000000000000000000000000000000000000000ci"
+      API_URL: "http://localhost:3000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply database migrations
+        run: pnpm --filter api run prisma:migrate:deploy
+
+      - name: Install Playwright browsers
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      - name: Build api and web
+        run: |
+          pnpm --filter api build
+          pnpm --filter web build
+
+      - name: Start apps/api in the background
+        run: |
+          pnpm --filter api run start:prod > api.log 2>&1 &
+          echo $! > api.pid
+
+      - name: Start apps/web in the background
+        run: |
+          pnpm --filter web exec next start -p 3001 > web.log 2>&1 &
+          echo $! > web.pid
+
+      - name: Wait for apps/api to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null; then
+              echo "apps/api is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "apps/api never became healthy" >&2
+          cat api.log
+          exit 1
+
+      - name: Wait for apps/web to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/login > /dev/null; then
+              echo "apps/web is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "apps/web never became healthy" >&2
+          cat web.log
+          exit 1
+
+      - name: Run Playwright tests
+        run: pnpm --filter web test:e2e
+
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-server-logs
+          path: |
+            api.log
+            web.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop background servers
+        if: always()
+        run: |
+          [ -f api.pid ] && kill "$(cat api.pid)" 2>/dev/null || true
+          [ -f web.pid ] && kill "$(cat web.pid)" 2>/dev/null || true

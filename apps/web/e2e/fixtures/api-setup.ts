@@ -1,0 +1,87 @@
+import type { BrowserContext } from "@playwright/test";
+import type {
+  CreateApiKeyResponse,
+  ProjectRecord,
+} from "@agenttrace/shared-types";
+import { uniqueEmail, uniqueName } from "./unique";
+
+// A fixed, real password, not itself under test here -- auth.spec.ts
+// covers signup/login correctness directly.
+const TEST_PASSWORD = "correct horse battery staple e2e";
+const CSRF_COOKIE_NAME = "agenttrace_csrf";
+
+async function readCsrfCookie(context: BrowserContext): Promise<string> {
+  const cookies = await context.cookies();
+  const cookie = cookies.find((c) => c.name === CSRF_COOKIE_NAME);
+  if (!cookie) {
+    throw new Error(
+      `Expected cookie "${CSRF_COOKIE_NAME}" to be set after signup`,
+    );
+  }
+  return cookie.value;
+}
+
+// Uses context.request, not the plain global `request` fixture:
+// BrowserContext.request shares its cookie jar with any `page` opened
+// from the same context, so the session/CSRF cookies set by signup
+// land exactly where a later page.goto() will read them from. Goes
+// through the Next.js proxy (relative paths against the configured
+// baseURL), not the API directly -- the cookies are scoped to whichever
+// origin issues them, and page navigation happens against the web
+// app's own origin. See ADR-0015.
+export async function signUpAndCreateProject(
+  context: BrowserContext,
+): Promise<{ email: string; project: ProjectRecord }> {
+  const api = context.request;
+  const email = uniqueEmail("e2e-user");
+  const orgName = uniqueName("E2E Org");
+  const projectName = uniqueName("E2E Project");
+
+  const signupRes = await api.post("/api/auth/signup", {
+    data: {
+      email,
+      password: TEST_PASSWORD,
+      name: "E2E Test User",
+      orgName,
+    },
+  });
+  if (!signupRes.ok()) {
+    throw new Error(
+      `Signup failed: ${signupRes.status()} ${await signupRes.text()}`,
+    );
+  }
+
+  const csrfToken = await readCsrfCookie(context);
+  const projectRes = await api.post("/api/projects", {
+    data: { name: projectName },
+    headers: { "X-CSRF-Token": csrfToken },
+  });
+  if (!projectRes.ok()) {
+    throw new Error(
+      `Project creation failed: ${projectRes.status()} ${await projectRes.text()}`,
+    );
+  }
+  const project = (await projectRes.json()) as ProjectRecord;
+
+  return { email, project };
+}
+
+export async function createApiKey(
+  context: BrowserContext,
+  projectId: string,
+  name: string,
+): Promise<CreateApiKeyResponse> {
+  const api = context.request;
+  const csrfToken = await readCsrfCookie(context);
+
+  const res = await api.post(`/api/projects/${projectId}/api-keys`, {
+    data: { name },
+    headers: { "X-CSRF-Token": csrfToken },
+  });
+  if (!res.ok()) {
+    throw new Error(
+      `API key creation failed: ${res.status()} ${await res.text()}`,
+    );
+  }
+  return (await res.json()) as CreateApiKeyResponse;
+}
