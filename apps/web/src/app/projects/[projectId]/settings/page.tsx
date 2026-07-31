@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { ApiKeysPanel } from "@/components/api-keys-panel";
+import { ConnectedApplicationsPanel } from "@/components/connected-applications-panel";
 
 export default function ProjectSettingsPage() {
   const params = useParams<{ projectId: string }>();
@@ -20,6 +21,9 @@ export default function ProjectSettingsPage() {
         </Link>
         <h1 className="mt-4 mb-6 text-2xl font-semibold">Project settings</h1>
         <ApiKeysPanel projectId={params.projectId} />
+        <div className="mt-10">
+          <ConnectedApplicationsPanel projectId={params.projectId} />
+        </div>
       </main>
     </>
   );

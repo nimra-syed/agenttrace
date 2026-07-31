@@ -1,10 +1,13 @@
 import type {
   ApiKeyRecord,
+  CliAuthorizePayload,
+  CliAuthorizeResponse,
   CreateApiKeyPayload,
   CreateApiKeyResponse,
   CreateProjectPayload,
   CurrentUser,
   EvalResultRecord,
+  InstallationRecord,
   ListTracesQuery,
   ListTracesResponse,
   LoginPayload,
@@ -239,5 +242,33 @@ export function triggerEvaluation(
 ): Promise<EvalResultRecord> {
   return request(`/projects/${projectId}/traces/${traceId}/evaluate`, {
     method: "POST",
+  });
+}
+
+export function listInstallations(
+  projectId: string,
+): Promise<InstallationRecord[]> {
+  return request(`/projects/${projectId}/installations`);
+}
+
+export function revokeInstallation(
+  projectId: string,
+  installationId: string,
+): Promise<{ success: boolean }> {
+  return request(`/projects/${projectId}/installations/${installationId}`, {
+    method: "DELETE",
+  });
+}
+
+// The CLI itself (a future milestone) exchanges the resulting code for
+// a real credential by calling POST /cli/token directly against the
+// API, not through this web app -- there is deliberately no
+// cliTokenExchange wrapper here.
+export function cliAuthorize(
+  payload: CliAuthorizePayload,
+): Promise<CliAuthorizeResponse> {
+  return request("/cli/authorize", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
