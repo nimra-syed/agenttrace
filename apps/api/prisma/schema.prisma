@@ -53,8 +53,10 @@ model User {
   name         String
   createdAt    DateTime @default(now())
 
-  memberships Membership[]
-  sessions    Session[]
+  memberships              Membership[]
+  sessions                 Session[]
+  installationsCreated     Installation[] @relation("InstallationCreatedBy")
+  installationsRevoked     Installation[] @relation("InstallationRevokedBy")
 }
 
 model Session {
@@ -89,9 +91,10 @@ model Project {
   slug      String
   createdAt DateTime @default(now())
 
-  organization Organization @relation(fields: [orgId], references: [id])
-  apiKeys      ApiKey[]
-  traces       Trace[]
+  organization  Organization   @relation(fields: [orgId], references: [id])
+  apiKeys       ApiKey[]
+  traces        Trace[]
+  installations Installation[]
 
   @@unique([orgId, slug])
 }
@@ -111,9 +114,63 @@ model ApiKey {
   @@index([projectId])
 }
 
+// A project-scoped, user-attributed credential, created via the
+// browser-based CLI-connect flow rather than typed/copied by hand.
+// Distinct from ApiKey (impersonal, admin-provisioned, for
+// CI/production/service use) on purpose: an Installation answers "which
+// human connected this," ApiKey answers "which system is this for." See
+// docs/architecture/cli-onboarding-design.md and ADR-0017.
+//
+// tokenHash is nullable and starts null: the raw secret is generated at
+// token-exchange time, not at browser-approval time, so a raw secret is
+// never persisted anywhere, even briefly, matching this project's
+// existing rule for every other credential (Session, ApiKey). A row
+// with tokenHash still null is what the dashboard later shows as
+// "Pending," not "Connected" -- it exists (approved), but nothing has
+// actually authenticated with it yet, since a Bearer lookup by hash can
+// never match a null column.
+model Installation {
+  id              String    @id @default(uuid())
+  projectId       String
+  createdByUserId String
+  label           String
+  tokenPrefix     String?
+  tokenHash       String?   @unique
+  lastUsedAt      DateTime?
+  revokedAt       DateTime?
+  revokedByUserId String?
+  createdAt       DateTime  @default(now())
+
+  project       Project               @relation(fields: [projectId], references: [id])
+  createdByUser User                  @relation("InstallationCreatedBy", fields: [createdByUserId], references: [id])
+  revokedByUser User?                 @relation("InstallationRevokedBy", fields: [revokedByUserId], references: [id])
+  authCode      CliAuthorizationCode?
+  traces        Trace[]
+
+  @@index([projectId])
+}
+
+// A short-lived, single-use authorization code binding one Installation
+// row to the PKCE challenge the requesting CLI generated. codeHash is
+// hashed at rest with the same discipline as every other secret in this
+// project; the raw code is only ever returned once, in the /cli/authorize
+// response. See ADR-0017.
+model CliAuthorizationCode {
+  id             String    @id @default(uuid())
+  codeHash       String    @unique
+  installationId String    @unique
+  codeChallenge  String
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  installation Installation @relation(fields: [installationId], references: [id])
+}
+
 model Trace {
   id              String      @id @default(uuid())
   projectId       String
+  installationId  String?
   externalTraceId String?
   name            String
   agentName       String
@@ -129,9 +186,10 @@ model Trace {
   metadata        Json?
   createdAt       DateTime    @default(now())
 
-  project Project @relation(fields: [projectId], references: [id])
-  spans   Span[]
-  evalResults EvalResult[]
+  project      Project       @relation(fields: [projectId], references: [id])
+  installation Installation? @relation(fields: [installationId], references: [id])
+  spans        Span[]
+  evalResults  EvalResult[]
 
   @@unique([projectId, externalTraceId])
   @@index([projectId, startedAt(sort: Desc)])

@@ -39,11 +39,12 @@ export class AuthController {
   // in @Throttle(). Without this, signup/login were also silently
   // subject to the 'evaluate' config's limit: 10 using this guard's own
   // email/IP tracker -- harmless only because 5 < 10 masked it. See
-  // ADR-0016.
+  // ADR-0016. 'cli-token' (ADR-0017) is skipped for the same reason,
+  // applied proactively this time instead of found live.
   @Public()
   @UseGuards(AuthThrottlerGuard)
   @Throttle(AUTH_THROTTLE)
-  @SkipThrottle({ evaluate: true })
+  @SkipThrottle({ evaluate: true, 'cli-token': true })
   @Post('signup')
   async signup(
     @Body() dto: SignupDto,
@@ -58,7 +59,7 @@ export class AuthController {
   @Public()
   @UseGuards(AuthThrottlerGuard)
   @Throttle(AUTH_THROTTLE)
-  @SkipThrottle({ evaluate: true })
+  @SkipThrottle({ evaluate: true, 'cli-token': true })
   @HttpCode(200)
   @Post('login')
   async login(

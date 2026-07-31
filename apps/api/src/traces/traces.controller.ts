@@ -19,6 +19,10 @@ export class TracesController {
     @CurrentApiKeyContext() apiKeyContext: ApiKeyContext,
     @Body() dto: CreateTraceDto,
   ) {
-    return this.tracesService.upsert(apiKeyContext.projectId, dto);
+    return this.tracesService.upsert(
+      apiKeyContext.projectId,
+      dto,
+      apiKeyContext.installationId,
+    );
   }
 }

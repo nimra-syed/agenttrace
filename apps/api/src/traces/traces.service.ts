@@ -24,7 +24,16 @@ export class TracesService {
     private readonly projectsService: ProjectsService,
   ) {}
 
-  async upsert(projectId: string, dto: CreateTraceDto): Promise<TraceRecord> {
+  // installationId is only ever set on the create branches below, never
+  // on update: it records who created this trace record, not who last
+  // touched it. undefined (ApiKey-authenticated ingestion) writes NULL
+  // on create, same Prisma undefined-vs-null behavior ADR-0008 already
+  // documents for every other optional field here. See ADR-0017.
+  async upsert(
+    projectId: string,
+    dto: CreateTraceDto,
+    installationId?: string,
+  ): Promise<TraceRecord> {
     const startedAt = new Date(dto.startedAt);
     const endedAt = toDateOrPassthrough(dto.endedAt);
     assertValidTimeRange(startedAt, endedAt);
@@ -54,6 +63,7 @@ export class TracesService {
       const trace = await this.prisma.trace.create({
         data: {
           projectId,
+          installationId,
           status: dto.status ?? TraceStatus.RUNNING,
           ...sharedData,
         },
@@ -70,6 +80,7 @@ export class TracesService {
       },
       create: {
         projectId,
+        installationId,
         externalTraceId: dto.externalTraceId,
         status: dto.status ?? TraceStatus.RUNNING,
         ...sharedData,

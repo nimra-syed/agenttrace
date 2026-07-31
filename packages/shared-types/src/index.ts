@@ -198,6 +198,56 @@ export interface EvalResultRecord {
   createdAt: string;
 }
 
+// Response shape for GET /projects/:projectId/installations. tokenHash
+// is never included (it's never even decryptable back to the raw
+// value); a still-null lastUsedAt combined with a non-revoked row is
+// what the dashboard (M14) derives "Pending" vs "Connected" status
+// from, not a separate status field. See ADR-0017.
+export interface InstallationRecord {
+  id: string;
+  projectId: string;
+  label: string;
+  createdByUserId: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  revokedByUserId: string | null;
+  createdAt: string;
+}
+
+// Request/response for POST /cli/authorize (session-authenticated,
+// CSRF-protected, the browser-side "approve" action). label is
+// optional: the caller (the CLI, via the initial authorize URL, in a
+// future milestone) is expected to auto-derive one, but the backend
+// falls back to a generated placeholder if none is supplied. codeChallenge
+// is the PKCE S256 challenge (RFC 7636) the CLI generated locally.
+export interface CliAuthorizePayload {
+  projectId: string;
+  codeChallenge: string;
+  label?: string;
+}
+
+export interface CliAuthorizeResponse {
+  code: string;
+  installationId: string;
+}
+
+// Request/response for POST /cli/token (public, no session -- this is
+// the CLI itself calling, not a browser). codeVerifier is the PKCE
+// secret the challenge above was derived from; token is the raw
+// Installation secret, returned exactly once, the same "shown once at
+// creation" guarantee ApiKey already makes, just deferred to this
+// exchange step instead of the authorize step. See ADR-0017.
+export interface CliTokenExchangePayload {
+  code: string;
+  codeVerifier: string;
+}
+
+export interface CliTokenExchangeResponse {
+  token: string;
+  installationId: string;
+  projectId: string;
+}
+
 // What POST /traces/:traceId/spans returns.
 export interface SpanRecord {
   id: string;

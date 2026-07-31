@@ -23,11 +23,13 @@ export class EvaluationsController {
   // ThrottlerGuard.canActivate, which loops over all of them. Without
   // this, the route was also being checked against the 'auth' config's
   // limit: 5 (using this guard's own tracker), tripping five requests
-  // early instead of at the intended 10. See ADR-0016.
+  // early instead of at the intended 10. See ADR-0016. 'cli-token'
+  // (ADR-0017) is skipped for the same reason, applied proactively this
+  // time instead of found live.
   @Post('evaluate')
   @UseGuards(EvaluationThrottlerGuard)
   @Throttle(EVALUATE_THROTTLE)
-  @SkipThrottle({ auth: true })
+  @SkipThrottle({ auth: true, 'cli-token': true })
   evaluate(
     @CurrentUser() user: AuthenticatedUser,
     @Param('projectId') projectId: string,

@@ -21,12 +21,17 @@ describe('ApiKeyGuard', () => {
   let guard: ApiKeyGuard;
   let prisma: {
     apiKey: { findUnique: jest.Mock; update: jest.Mock };
+    installation: { findUnique: jest.Mock; update: jest.Mock };
   };
 
   beforeEach(() => {
     prisma = {
       apiKey: {
-        findUnique: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      installation: {
+        findUnique: jest.fn().mockResolvedValue(null),
         update: jest.fn().mockResolvedValue({}),
       },
     };
@@ -49,14 +54,14 @@ describe('ApiKeyGuard', () => {
     );
   });
 
-  it('rejects an unknown key', async () => {
-    prisma.apiKey.findUnique.mockResolvedValue(null);
+  it('rejects a token that matches neither an ApiKey nor an Installation', async () => {
     const { context } = contextWithHeaders({
       authorization: 'Bearer atr_doesnotexist',
     });
     await expect(guard.canActivate(context)).rejects.toThrow(
       UnauthorizedException,
     );
+    expect(prisma.installation.findUnique).toHaveBeenCalled();
   });
 
   it('rejects a revoked key', async () => {
@@ -91,6 +96,9 @@ describe('ApiKeyGuard', () => {
       projectId: 'project-1',
       orgId: 'org-1',
     });
+    // Never falls through to an Installation lookup once an ApiKey
+    // already matched.
+    expect(prisma.installation.findUnique).not.toHaveBeenCalled();
   });
 
   it('updates lastUsedAt when it has never been set', async () => {
@@ -143,13 +151,83 @@ describe('ApiKeyGuard', () => {
     });
   });
 
-  it('gives the exact same error message for every rejection case', async () => {
-    prisma.apiKey.findUnique.mockResolvedValue(null);
+  // ADR-0017: this guard authenticates two credential types now.
+  describe('Installation credentials', () => {
+    it('accepts a valid, unrevoked installation and attaches installationId (not apiKeyId)', async () => {
+      prisma.installation.findUnique.mockResolvedValue({
+        id: 'installation-1',
+        revokedAt: null,
+        lastUsedAt: null,
+        project: { id: 'project-1', orgId: 'org-1' },
+      });
 
+      const { context, request } = contextWithHeaders({
+        authorization: 'Bearer atc_validtoken',
+      });
+      const result = await guard.canActivate(context);
+
+      expect(result).toBe(true);
+      expect(request.apiKeyContext).toEqual({
+        installationId: 'installation-1',
+        projectId: 'project-1',
+        orgId: 'org-1',
+      });
+    });
+
+    it('rejects a revoked installation with the exact same message as an unknown token', async () => {
+      async function messageFor(context: ExecutionContext) {
+        return guard
+          .canActivate(context)
+          .catch((error: unknown) =>
+            error instanceof UnauthorizedException ? error.message : null,
+          );
+      }
+
+      prisma.installation.findUnique.mockResolvedValue({
+        id: 'installation-1',
+        revokedAt: new Date(),
+        project: { id: 'project-1', orgId: 'org-1' },
+      });
+      const revokedMessage = await messageFor(
+        contextWithHeaders({ authorization: 'Bearer atc_revoked' }).context,
+      );
+
+      prisma.installation.findUnique.mockResolvedValue(null);
+      const unknownMessage = await messageFor(
+        contextWithHeaders({ authorization: 'Bearer atc_unknown' }).context,
+      );
+
+      expect(revokedMessage).toBe(unknownMessage);
+      expect(revokedMessage).not.toBeNull();
+    });
+
+    it('updates the installation lastUsedAt, not the api key table', async () => {
+      prisma.installation.findUnique.mockResolvedValue({
+        id: 'installation-1',
+        revokedAt: null,
+        lastUsedAt: null,
+        project: { id: 'project-1', orgId: 'org-1' },
+      });
+
+      const { context } = contextWithHeaders({
+        authorization: 'Bearer atc_x',
+      });
+      await guard.canActivate(context);
+
+      expect(prisma.installation.update).toHaveBeenCalledWith({
+        where: { id: 'installation-1' },
+        data: { lastUsedAt: expect.any(Date) as Date },
+      });
+      expect(prisma.apiKey.update).not.toHaveBeenCalled();
+    });
+  });
+
+  it('gives the exact same error message for every rejection case, including both credential types', async () => {
     const cases = [
       contextWithHeaders({}).context,
       contextWithHeaders({ authorization: 'garbage' }).context,
       contextWithHeaders({ authorization: 'Bearer atr_unknown' }).context,
+      contextWithHeaders({ authorization: 'Bearer atc_unknown' }).context,
     ];
 
     const messages = await Promise.all(
