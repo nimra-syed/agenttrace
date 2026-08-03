@@ -1,5 +1,373 @@
 # Learning Journal
 
+## M15 — `@agenttrace/cli` and the real connect flow (2026-08-02)
+
+### What I built
+
+- `packages/cli` (`@agenttrace/cli`), a real, standalone CLI: `connect`
+  (opens a browser, runs a real loopback listener, exchanges a real
+  authorization code plus PKCE verifier for a credential, writes it
+  into a target app's `.env`, sends a real smoke trace), `whoami`/
+  `status`, `disconnect` (local-only), and `test`.
+- A real build step, the first in this monorepo: esbuild bundles
+  `src/bin.ts` into a single `dist/bin.js`, inlining
+  `@agenttrace/sdk`/`@agenttrace/shared-types`'s raw TypeScript source
+  directly, plus a separate `tsc --emitDeclarationOnly` pass for types.
+- A hand-rolled `.env` editor (`env-file.ts`) that updates or appends
+  specific keys without disturbing comments, blank lines, or unrelated
+  keys, and preserves the file's own line-ending style.
+- 28 colocated Jest unit tests across `pkce.ts`, `label.ts`, and
+  `env-file.ts`, plus a genuinely live, end-to-end manual verification:
+  running the built CLI against a real throwaway application directory,
+  approving in a real browser with a throwaway test account, and
+  confirming the resulting trace and Connected Application in Postgres.
+
+### What I learned
+
+- A package meant to run standalone outside the monorepo (via `npx` or
+  a plain `node` invocation) cannot share `packages/sdk`'s and
+  `packages/shared-types`' "ship raw TypeScript" convention. Those two
+  packages only ever get consumed by something already running through
+  a TypeScript-aware tool; `packages/cli` doesn't have that luxury once
+  it leaves this repo, confirmed the hard way when a plain-`tsc`-built
+  version failed immediately trying to `require()` one of them.
+- `AgentTraceClient.trace()`'s fail-open design (ADR-0009) is a design
+  decision made for a specific consumer, not a universal default: it is
+  exactly correct for instrumenting someone else's agent, and exactly
+  wrong for a CLI command whose entire job is telling the truth about
+  whether a connection works. The same code can be the right choice in
+  one caller and the wrong choice in another; what matters is checking
+  which one you're actually building for, not treating "this is how the
+  SDK behaves" as settled everywhere it gets used.
+- A process that appears to finish all its real work can still hang
+  indefinitely because of something entirely outside your own code
+  (an idle keep-alive socket Node's built-in `fetch` leaves open). The
+  useful debugging move wasn't guessing at the cause, it was building a
+  series of small, targeted reproduction scripts that each ruled out one
+  candidate (the loopback server, `open()`, the SDK's own transport)
+  until only one plausible explanation was left.
+- Testing filesystem-mutation logic (`.env` editing) by comparing exact
+  file contents byte-for-byte, not just checking a key's value with a
+  substring match, is what actually catches a bug like a stray blank
+  line or a mixed line-ending file. A substring check would have passed
+  on both of this milestone's real bugs.
+
+### Decisions made
+
+- ADR-0018: bundling `packages/cli` with esbuild rather than plain
+  `tsc`; gating `connect`/`whoami`/`test`'s success reporting on a real
+  `GET /api-keys/verify` call rather than the SDK's own fail-open
+  `.trace()` result; an explicit `process.exit()` in `bin.ts` as the
+  correct, CLI-specific fix for the hang; deferring `--project`
+  preselection and a Bearer-token self-revoke endpoint as accepted,
+  explicitly out-of-scope gaps rather than building either into this
+  milestone.
+- Prompting before overwriting an existing `.env`'s
+  `AGENTTRACE_API_KEY`/`AGENTTRACE_BASE_URL` (with `--force` to skip),
+  a UX correction requested before implementation began.
+
+### Problems encountered and how we resolved them
+
+- A first, plain-`tsc`-built version of the CLI failed at runtime with
+  `SyntaxError: Unexpected identifier` the moment it tried to
+  `require('@agenttrace/sdk')`. Fixed by switching the build to esbuild
+  bundling and moving the two workspace packages from `dependencies` to
+  `devDependencies`, since the published CLI no longer needs them at
+  runtime once they're inlined.
+- The first fully-successful live run printed a correct "Connected!"
+  message but never returned control to the shell. Diagnosed by
+  elimination, not assumption: built and ran a series of increasingly
+  targeted reproduction scripts, ruling out the loopback server,
+  `open()`, and the SDK's own (correctly `clearTimeout`'d) HTTP
+  transport individually, before concluding the remaining explanation
+  was Node's built-in fetch leaving an idle keep-alive socket open.
+  Fixed with a single `process.exit()` call in `bin.ts`, chained onto
+  `main()`'s `.finally()`, verified by rerunning the exact same live
+  flow and observing the process exit on its own.
+- `removeEnvValues`'s first version left a stray blank line behind when
+  removing a key from a file that had one, caused by not stripping the
+  trailing empty string a plain `split("\n")` produces for a file ending
+  in a newline. Caught by its own test comparing file contents exactly,
+  before this ever touched a real `.env` file.
+- A CRLF line-ending bug, found during final review, not by any test
+  written up to that point: the original `setEnvValues`/`removeEnvValues`
+  always rejoined lines with a plain `"\n"`, so a CRLF-formatted `.env`
+  file kept `\r\n` only on lines the tool never touched, while any
+  rewritten or appended line came back `\n`-only, a mixed-ending file.
+  Fixed by detecting the file's existing line ending and reapplying it
+  uniformly to every line, touched or not; verified the fix actually
+  catches the regression by temporarily reverting to a plain `"\n"` join
+  and confirming exactly the new CRLF-specific tests failed, then
+  restoring the fix and rerunning the full suite clean.
+- A real installation token appeared in this session's own terminal
+  output from a plain `cat .env` run during hang debugging. Handled
+  immediately per this project's own credential-hygiene rule: the token
+  was never reused for further testing, disclosed the same turn, and
+  both it and a second valid connection were revoked from the dashboard
+  once verification finished.
+
+### Interview questions I should be able to answer
+
+- Why does a CLI package need a bundled build when the rest of this
+  monorepo's packages don't, and what specifically breaks without one?
+- Walk through why `AgentTraceClient.trace()`'s fail-open design is
+  correct in one context and wrong in another, and how `connect` works
+  around that without changing the SDK itself.
+- How did you actually diagnose a process hang with no error message and
+  no obvious stack trace to follow?
+- What real bug did testing your `.env` editor byte-for-byte (not just
+  by value) catch that a looser test would have missed?
+- What would it take to make `agenttrace disconnect` fully revoke a
+  connection server-side, and why wasn't that built in this milestone?
+
+### Common mistakes engineers make here
+
+- Assuming a library's documented (or even correct) behavior for one
+  use case is automatically correct for every caller, instead of
+  checking whether this specific caller's requirements actually match.
+- Guessing at the cause of a hanging process instead of building small,
+  targeted reproductions that rule candidates out one at a time.
+- Testing file-mutation logic only by checking that the intended change
+  happened, not by comparing the entire file's contents exactly, which
+  is what actually catches corruption or formatting regressions in the
+  untouched parts.
+- Treating "the exchange succeeded" and "the resulting credential
+  actually works" as the same fact, when they can diverge and a real
+  tool needs to check the second one directly.
+- Continuing to use a credential that has appeared in terminal output
+  "just this once for local testing" instead of treating any such
+  appearance as a real exposure requiring rotation.
+
+### How this milestone improves my resume
+
+"Built and shipped a real CLI package requiring its own bundled build
+pipeline, diagnosed a process-hang bug by systematic elimination rather
+than guesswork, and caught a file-corruption regression with exact
+byte-for-byte tests before it ever reached a real file" is a specific,
+verifiable claim about tooling, debugging discipline, and test rigor,
+not just "built a CLI."
+
+## M14 — Connected Applications dashboard UI (2026-08-01)
+
+### What I built
+
+- The `/cli/authorize` approve page: reads `state`, `redirect_uri`,
+  `code_challenge`, and `suggested_name` from the query string, lets a
+  signed-in person pick (or inline-create) a project, and on approval
+  redirects back to the CLI's loopback listener with a real
+  authorization code.
+- `ConnectedApplicationsPanel` on the project settings page, the first
+  UI for M13's `Installation` model: shows each connection's derived
+  status (Pending/Connected/Revoked), who connected it, and an inline
+  confirm/cancel revoke, matching `ApiKeysPanel`'s existing pattern.
+- 7 real, not-mocked Playwright tests covering missing params, an
+  external redirect being blocked, the userinfo-bypass exploit URL
+  being blocked, a real approve-and-redirect against a real throwaway
+  loopback listener, existing `redirect_uri` query params surviving the
+  callback, and inline project creation.
+
+### What I learned
+
+- A `startsWith()` check on a URL is not the same thing as validating
+  its host. `"http://localhost:1234@evil.example.com/callback"` passes
+  `startsWith("http://localhost")` while actually pointing at
+  `evil.example.com`, because everything before the `@` is userinfo
+  (credentials), not host. The correct fix is to parse the string with
+  `new URL()` and check `protocol`, `hostname`, `port`, `username`, and
+  `password` as separate, explicit fields, never a prefix match against
+  the raw string.
+- Building a redirect URL by string concatenation risks silently
+  dropping or duplicating query parameters the caller already supplied.
+  `new URL(redirectUri)` plus `.searchParams.set(...)` handles this
+  correctly without extra logic, since the URL object already knows how
+  to merge into an existing query string.
+- A route with no dynamic segment in its path still needs a `<Suspense>`
+  boundary around `useSearchParams()` if it's going to be statically
+  prerendered, something I only actually confirmed by watching a
+  production build fail with the exact error, not by reading about it
+  first.
+- Defense-in-depth is worth applying even when a check already exists
+  elsewhere: re-validating `redirect_uri` in the approve handler itself,
+  not just at render time, means a component re-render or a
+  race between validation and submission can't create a gap.
+
+### Decisions made
+
+- The UI-facing term is "Connected Applications"; the model, service,
+  and route names all stay `Installation`, the same naming split
+  `ApiKeysPanel` already established for `ApiKey`. See ADR-0017 and the
+  design doc.
+- `redirect_uri` validation uses `new URL()` field-by-field checks
+  (`protocol === "http:"`, `hostname` exactly `localhost` or
+  `127.0.0.1`, a non-empty `port`, empty `username`/`password`), applied
+  both at render time and again inside the approve handler.
+- Connection status is derived client-side from `lastUsedAt`/
+  `revokedAt`, no new backend field needed for it.
+
+### Problems encountered and how we resolved them
+
+- The initial plan used `startsWith()` for `redirect_uri` validation.
+  Corrected before implementation: given the exact bypass URL above,
+  switched to full `new URL()` field validation, and verified the fix
+  actually catches that exact exploit by temporarily reverting to
+  `startsWith()`, confirming the test failed, then restoring the fix.
+- `pnpm build` failed in production mode with "useSearchParams() should
+  be wrapped in a suspense boundary," since `/cli/authorize` has no
+  dynamic route segment and gets statically prerendered by default.
+  Fixed by splitting the page into an outer component (wrapping an inner
+  one in `<Suspense fallback={null}>`) that does the actual work.
+- The only open browser tab available for live verification had a real,
+  signed-in `nimra@gmail.com` session in it. Rather than touch a real
+  account's session without asking, I raised it directly; the call was
+  made to skip manual browser verification for this one step and rely
+  on the real (not mocked) Playwright coverage instead.
+
+### Interview questions I should be able to answer
+
+- Walk through the exact userinfo-based bypass of a `startsWith()`
+  redirect-uri check, and why `new URL()` field validation closes it.
+- Why validate `redirect_uri` twice (render time and submit time)
+  instead of once?
+- Why does building a redirect URL with `URLSearchParams` matter more
+  than it might seem, compared to string concatenation?
+- What's the actual failure mode `<Suspense>` around `useSearchParams()`
+  is protecting against, and why does it only show up in a production
+  build?
+- Why keep "Installation" as the internal name while showing "Connected
+  Applications" in the UI, instead of renaming the model to match?
+
+### Common mistakes engineers make here
+
+- Validating a URL by checking whether a string starts with an expected
+  prefix, instead of parsing it and checking its actual structured
+  fields.
+- Building redirect or callback URLs by string concatenation instead of
+  using `URL`/`URLSearchParams`, risking dropped or duplicated query
+  parameters.
+- Trusting a validation check that runs once at render time to still
+  hold true by the time a later action actually executes.
+- Assuming a route without a dynamic segment can't hit prerendering
+  issues, since "no params in the path" doesn't mean "no
+  `useSearchParams()` usage."
+- Proceeding with live manual testing in a browser tab without first
+  confirming whose session is actually active in it.
+
+### How this milestone improves my resume
+
+"Found and fixed a redirect-uri validation vulnerability (a userinfo-
+based bypass of a naive prefix check) before it shipped, replacing it
+with structured URL field validation applied at two separate points in
+the flow" is a specific, verifiable security-review claim, not just
+"built a settings page."
+
+## M13 — Installation credentials (CLI-connect backend) (2026-07-31)
+
+### What I built
+
+- The `Installation` and `CliAuthorizationCode` Prisma models: a
+  second, personal, self-service credential type alongside the
+  existing impersonal, admin-provisioned `ApiKey`.
+- `POST /cli/authorize` (session-authenticated) and `POST /cli/token`
+  (public): an authorization-code-plus-PKCE exchange, where a code is
+  minted when a person approves a connection in the browser, and a real
+  secret is only generated once the CLI completes the second half of
+  the exchange.
+- `ApiKeyGuard`, generalized in place to check both `ApiKey` and
+  `Installation` credential tables, returning the exact same generic
+  failure message for either.
+- `Trace.installationId`, a new nullable provenance column, added in
+  this migration even though nothing reads it back yet.
+- A third named throttler (`'cli-token'`), with `@SkipThrottle()`
+  applied to every other already-throttled route upfront, and unit and
+  integration tests for every new piece (PKCE, the service layer, the
+  guard, the throttler, the extended cross-throttler regression test).
+
+### What I learned
+
+- An "illustrative schema sketch" in a design doc is a starting point,
+  not a contract. The design doc's original `Installation.tokenHash`
+  was non-nullable, which would have meant generating and persisting a
+  raw secret at browser-approval time, even briefly. Following this
+  project's own existing rule (never persist a raw secret, only its
+  hash) took precedence over matching the doc exactly, and the actual
+  implementation is better for it: making `tokenHash` nullable and
+  populating it only at exchange time means a pending, never-exchanged
+  `Installation` can never authenticate anything, with no special-case
+  logic needed to exclude it.
+- A lesson from a previous milestone is only actually "learned" once
+  it's applied without being prompted. M12 found the cumulative-named-
+  throttler bug live, by accident. This milestone added a third named
+  throttler and applied `@SkipThrottle()` everywhere upfront, on
+  purpose, verified by a test, rather than waiting to rediscover the
+  same bug a second time.
+- Atomically claiming a single-use resource under concurrency isn't
+  just "check then act," it needs the check and the claim to be the
+  same database operation. `updateMany({ where: { id, usedAt: null } })`
+  inside a transaction, checking the affected row count, is what
+  actually closes the race window between two concurrent exchange
+  attempts for the same authorization code; a separate `findUnique`
+  followed by an `update` would not.
+
+### Decisions made
+
+- ADR-0017: `Installation` as a distinct model from `ApiKey`;
+  `tokenHash` generated at exchange time, not approval time; the
+  authorization-code-plus-PKCE flow; the generalized `ApiKeyGuard`;
+  `Trace.installationId` added ahead of any UI reading it; the third
+  named throttler with throttle-scoping applied proactively.
+
+### Problems encountered and how we resolved them
+
+- No significant live bugs surfaced during this milestone, unlike M11
+  and M12. The cumulative-throttler bug that did surface at M12 was
+  specifically avoided here by applying its fix proactively rather than
+  waiting to hit it again; the extended regression test confirms all
+  three named throttlers are actually isolated, not just assumed to be.
+- An early version of `InstallationsService.authorize()` typed `label`
+  as `label: string | undefined` instead of `label?: string`, which
+  failed type-checking against tests that called it with fewer
+  arguments. A small, mechanical fix, but a reminder that an optional
+  parameter needs to actually be declared optional, not just typed to
+  accept `undefined`.
+
+### Interview questions I should be able to answer
+
+- Why is `Installation.tokenHash` nullable, and what does a `null` value
+  there actually mean operationally?
+- Walk through the authorization-code-plus-PKCE exchange end to end:
+  what's minted when, what's compared against what, and what stops a
+  stolen code from being replayed.
+- Why extend `ApiKeyGuard` in place instead of writing a second guard
+  for the new credential type?
+- Why does `Trace.installationId` get added now, before any UI reads it
+  back out?
+- What specifically makes the `updateMany`-inside-a-transaction pattern
+  safe against concurrent exchange attempts, that a plain
+  find-then-update wouldn't be?
+
+### Common mistakes engineers make here
+
+- Treating a design doc's illustrative schema as final once
+  implementation starts, instead of re-checking it against the
+  project's actual existing rules for similar data.
+- Reading about a bug fix once and considering the lesson "learned,"
+  without checking whether the same class of bug could recur the next
+  time similar code is added.
+- Implementing a "claim a single-use resource" check as a separate
+  read-then-write instead of a single atomic conditional update,
+  leaving a race window open under concurrency.
+- Typing an optional function parameter as `T | undefined` instead of
+  `param?: T`, which looks equivalent but isn't at every call site.
+
+### How this milestone improves my resume
+
+"Designed a second, self-service credential type alongside an existing
+admin-provisioned one, implemented an OAuth-style authorization-code-
+plus-PKCE exchange with atomic single-use code claiming under
+concurrency, and proactively closed a rate-limiter bug class found in a
+previous milestone before it could recur" is a specific, verifiable
+claim about credential design and applied debugging discipline.
+
 ## M12 — LLM-as-judge evaluation (2026-07-30)
 
 ### What I built

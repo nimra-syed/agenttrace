@@ -227,6 +227,81 @@ copy, and the append-only history newest-first), deliberately narrow:
 no configurable rubric, model selection, auto-evaluation, deletion,
 comparison, or raw evaluation-input display yet.
 
+M13 adds `Installation`, a second credential type alongside `ApiKey`,
+built for the self-service `agenttrace connect` flow the design doc at
+`docs/architecture/cli-onboarding-design.md` laid out, see ADR-0017.
+Where `ApiKey` is impersonal and admin-provisioned, `Installation` is
+personal and self-service: a signed-in person approves it in the
+browser, and the CLI exchanges it for a real credential without anyone
+ever typing or copying a secret by hand. `Installation.tokenHash` is
+nullable and stays `null` until `POST /cli/token` actually exchanges a
+code for it, a deliberate deviation from the design doc's own schema
+sketch, so a raw secret is never persisted even briefly, matching the
+same rule every other credential in this project already follows.
+`POST /cli/authorize` (session-authenticated) mints a short-lived,
+single-use, hashed `CliAuthorizationCode` bound to a PKCE
+`code_challenge`; `POST /cli/token` (public) recomputes the challenge
+from the caller's `code_verifier`, compares it constant-time, and
+atomically claims the code inside a `prisma.$transaction` before
+generating and hashing the real secret. `ApiKeyGuard` was extended in
+place, not duplicated, to also check the `Installation` table, and
+returns the exact same generic `401 Invalid API key` for either
+credential type's failure. `Trace.installationId` (nullable, set only
+on create) was added in this same migration even though nothing reads
+it back yet, since it can't be backfilled for traces ingested before it
+existed. A third named throttler (`'cli-token'`, keyed on a hash of the
+submitted code, not IP) was added with `@SkipThrottle()` applied to
+every other route upfront, the cumulative-named-throttler lesson from
+M12 (ADR-0016) applied proactively instead of rediscovered.
+
+M14 builds the dashboard half of the same flow: the `/cli/authorize`
+approve page and a `ConnectedApplicationsPanel` on the project settings
+page, see ADR-0017 and the design doc. The UI calls the credential
+"Connected Applications," the model and code stay named `Installation`,
+the same naming split `ApiKeysPanel` already established for `ApiKey`.
+`isSafeLoopbackRedirect()` validates the CLI-supplied `redirect_uri` by
+parsing it with `new URL()` and checking `protocol`, `hostname`, `port`,
+`username`, and `password` as separate fields, never with
+`startsWith()`, which a userinfo trick
+(`http://localhost:1234@evil.example.com/callback`) can bypass since
+everything before the `@` is credentials, not host. The approve action
+re-checks this validation a second time before building the redirect,
+defense-in-depth on top of the render-time gate. The callback URL is
+built with `new URL(redirectUri)` and `.searchParams.set(...)`, never
+string concatenation, so existing query params on the caller-supplied
+`redirect_uri` survive. Connection status (Pending/Connected/Revoked) is
+derived client-side from the already-exposed `lastUsedAt`/`revokedAt`
+fields, no new backend field needed.
+
+M15 builds the actual `@agenttrace/cli` package (`agenttrace connect`,
+`whoami`/`status`, `disconnect`, `test`), the first package in this
+monorepo that needs a real build step, see ADR-0018. `packages/sdk` and
+`packages/shared-types` ship raw TypeScript, fine for in-monorepo
+consumers running through `tsx`/`ts-jest`, but a plain `node
+dist/bin.js` process outside the monorepo can't `require()` raw `.ts`,
+confirmed live when a first, plain-`tsc` build failed immediately with
+`SyntaxError: Unexpected identifier`. Fixed by bundling with esbuild
+(`--bundle --platform=node --format=cjs`), which inlines
+`@agenttrace/sdk`/`@agenttrace/shared-types` directly into
+`dist/bin.js`; both packages moved from `dependencies` to
+`devDependencies` since the published CLI doesn't need them at runtime
+once bundled. `connect` generates a PKCE verifier/challenge and `state`,
+starts a `127.0.0.1`-only loopback server, opens the browser to
+`/cli/authorize`, waits for the callback, exchanges the code at
+`/cli/token`, and writes `AGENTTRACE_API_KEY`/`AGENTTRACE_BASE_URL` into
+the target app's `.env` (prompting before overwriting existing values,
+unless `--force`). `AgentTraceClient.trace()`'s fail-open design
+(ADR-0009), correct for instrumenting a real agent, is exactly wrong for
+a command whose job is reporting whether a connection works, so
+`connect`/`whoami`/`test` all gate success on a real call to the
+existing `GET /api-keys/verify` endpoint first, confirmed to already
+work for Installation credentials with zero backend changes, then still
+call `.trace()` afterward as a real SDK-usage demonstration. `bin.ts`
+calls `process.exit()` explicitly once a command's work is done, fixing
+a real hang traced (by elimination, not guessed) to Node's built-in
+fetch leaving an idle keep-alive socket open past the CLI's actual
+work.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -239,6 +314,10 @@ comparison, or raw evaluation-input display yet.
 - One ADR per significant architectural decision, written at the milestone
   where the decision is implemented (`docs/adr/NNNN-title.md`).
 - `docs/learning-journal.md` updated after every milestone.
+- `packages/cli` (M15) is the first package in the monorepo that ships a
+  real build output instead of raw TypeScript: it's bundled with esbuild
+  so it can run standalone (`node dist/bin.js`) outside the monorepo,
+  with no TypeScript tooling of its own available. See ADR-0018.
 
 ## Commands
 
@@ -263,6 +342,13 @@ The first time you run e2e tests locally, install the browser once:
 `apps/eval-worker` (Python/FastAPI) is not part of the pnpm workspace
 and has its own setup, run, test, and lint commands, documented in
 `apps/eval-worker/README.md`.
+
+`packages/cli` has its own build (`pnpm --filter @agenttrace/cli
+build`, esbuild bundling `dist/bin.js` plus a `tsc --emitDeclarationOnly`
+pass for types) and test (`pnpm --filter @agenttrace/cli test`) commands,
+documented in `packages/cli/README.md`. Running the CLI itself against a
+real target application, once built: `node packages/cli/dist/bin.js
+connect` from that application's own directory.
 
 Local Postgres (once `pnpm db:up` is running):
 `postgresql://agenttrace:agenttrace_dev_password@localhost:5433/agenttrace`
@@ -308,6 +394,25 @@ Playwright's `page.route()`, since a real evaluation is a real, paid LLM
 call that shouldn't run on every push. Both a real successful evaluation
 and several real provider failures were verified by hand in a live
 browser instead, see ADR-0016.
+
+`throttler-scoping.integration.spec.ts` (M13) was extended to cover all
+three named throttlers (`'auth'`, `'evaluate'`, `'cli-token'`), proving
+each is actually isolated to its own route rather than just intended to
+be, the same regression-test pattern M12 introduced. `api-key.guard.spec.ts`
+was extended with `Installation`-credential test cases alongside its
+existing `ApiKey` ones. M14's `cli-authorize.spec.ts` and
+`connected-applications-panel.spec.ts` are real, not-mocked Playwright
+tests (a real backend, a real throwaway loopback listener standing in
+for the not-yet-built CLI, a real approve-and-redirect flow), a
+deliberate departure from M12's mocked frontend tests since this
+milestone's own logic (redirect-uri validation, the PKCE exchange) is
+exactly the kind of security-sensitive logic this project's testing
+philosophy says shouldn't be mocked away. M15's `packages/cli` has
+colocated Jest unit tests for every pure-logic module (`pkce.spec.ts`,
+`label.spec.ts`, `env-file.spec.ts`, including a dedicated
+line-ending-preservation suite for the CRLF fix); nothing spins up a
+real browser or loopback server in the test suite, that's what M15's
+live, manual CLI run against a throwaway directory was for instead.
 
 ## Security rules
 
@@ -394,34 +499,78 @@ browser instead, see ADR-0016.
   the new limit. Found live at M12 (the `'evaluate'` throttler was
   silently also checked against `'auth'`'s lower limit, and vice versa);
   see ADR-0016 and `throttler-scoping.integration.spec.ts`.
+- `ApiKeyGuard` now checks both `ApiKey` and `Installation` credential
+  tables and returns the exact same generic `401 Invalid API key` for
+  every failure mode of either, the same uniform-error-message rule
+  extended to a second credential type instead of a differently-worded
+  second failure mode. See ADR-0017.
+- `Installation.tokenHash` is nullable and stays `null` from
+  browser-approval until the CLI actually completes the token exchange,
+  so a raw secret is never persisted anywhere, even briefly, matching
+  the same rule this project applies to `Session` and `ApiKey`. A `null`
+  `tokenHash` can never match a submitted Bearer token, so a pending,
+  never-exchanged `Installation` can never authenticate anything. See
+  ADR-0017.
+- `POST /cli/token`'s authorization-code exchange verifies a PKCE
+  `code_challenge`/`code_verifier` pair with a constant-time comparison
+  (`codeChallengesMatch`) and atomically claims the code inside a
+  `prisma.$transaction` (`updateMany` scoped to `usedAt: null`,
+  checking the affected row count), closing the race window between two
+  concurrent exchange attempts for the same code. See ADR-0017.
+- `redirect_uri` supplied by the CLI to `/cli/authorize` is validated
+  with `new URL()`, checking `protocol`, `hostname`, `port`, `username`,
+  and `password` as separate fields, never with `startsWith()`. A
+  `startsWith("http://127.0.0.1:")` check is bypassable with a userinfo
+  trick (`http://localhost:1234@evil.example.com/callback`, where
+  everything before the `@` is credentials, not host). The approve
+  action re-checks this validation a second time before redirecting, in
+  addition to the render-time gate. Found and specified during M14's
+  plan review, not found live; see ADR-0017 and
+  `apps/web/src/app/cli/authorize/page.tsx`.
+- The M15 credential-hygiene incident (a real installation token
+  appeared in terminal output from a debugging `cat .env` run) was
+  handled per the existing rule above: the token was never reused, both
+  it and a second valid connection were revoked from the dashboard once
+  verification finished. See ADR-0018.
 
 ## Current milestone
 
-M12 complete: LLM-as-judge evaluation, the first slice of the
-"evaluation" half of this project's stated purpose (ADR-0016). A
-separate stateless Python/FastAPI worker (`apps/eval-worker`), a
-bounded/truncated evidence snapshot, append-only reproducible evaluation
-history, a cost-containment throttle, sanitized cross-service error
-handling, and a narrow frontend (an Evaluate button and history list on
-the trace detail page, deliberately no rubric config, model selection,
-comparison, or deletion yet). A real bug was found and fixed during live
-throttle verification: `ThrottlerGuard` applies every named throttler to
-any route it guards, not just the one a route's own `@Throttle()`
-references, so `signup`/`login` and the new evaluate route each needed
-an explicit `@SkipThrottle()` for the other's limit. A real successful
-evaluation was verified live during the backend checkpoint, twice,
-producing different scores from real LLM non-determinism, demonstrating
-the append-only history. The frontend's own live verification instead
-exercised the error path for real: several genuine `429`/`503`
-responses from Gemini's free-tier quota, confirmed via a direct
-out-of-band call to be real quota exhaustion, not a code bug, rendering
-correctly through the new sanitized error mapping. The frontend's
-success-path rendering (score, rationale, judge model, evaluator
-version) was verified with a mocked Playwright test instead, once the
-live quota ran out, accepted as sufficient at the user's call. M11
-(Playwright end-to-end tests and CI's first real database, ADR-0015),
-M10 (API key management UI), and M9 (CSRF protection and login/signup
-rate limiting, ADR-0014) are also complete.
+M15 complete: `@agenttrace/cli`, the real `agenttrace connect` flow, and
+the last of the three milestones (M13/M14/M15) that built self-service
+CLI onboarding end to end (`docs/architecture/cli-onboarding-design.md`,
+ADR-0017, ADR-0018). `connect` genuinely opens a browser, runs a real
+loopback listener on `127.0.0.1`, exchanges a real authorization code
+plus PKCE verifier for a real credential at `/cli/token`, writes
+`AGENTTRACE_API_KEY`/`AGENTTRACE_BASE_URL` into a target application's
+`.env` (prompting before overwriting existing values unless `--force`),
+and sends a real SDK smoke trace. `packages/cli` is the first package in
+this monorepo that needs a real build (esbuild bundling, since a plain
+`node dist/bin.js` process outside the monorepo can't `require()`
+`packages/sdk`/`packages/shared-types`'s raw TypeScript, found live when
+a first plain-`tsc` attempt failed immediately). Verified against a
+real, separate throwaway application directory, not just unit tests:
+`connect`, `whoami`, `test`, and `disconnect` were each run for real
+against a live backend, with a real browser approval in the loop and
+real cleanup afterward (including revoking a connection exposed once,
+by accident, in debugging terminal output, disclosed and remediated the
+same turn per this project's own credential-hygiene rule). Two real bugs
+were found and fixed during this milestone: a process hang traced by
+elimination to Node's built-in fetch keeping an idle socket open past
+the CLI's actual work (fixed with an explicit `process.exit()`), and a
+CRLF line-ending bug in the hand-rolled `.env` editor found during
+review and closed with 8 new tests before shipping, not left as debt.
+
+M14 (Connected Applications dashboard UI, the `/cli/authorize` approve
+page) and M13 (the `Installation` credential backend: schema, PKCE
+authorization-code exchange, generalized `ApiKeyGuard`,
+`Trace.installationId` provenance) are also complete, both part of the
+same three-milestone CLI-connect arc as M15. The `redirect_uri`
+validation on the M14 approve page was corrected during plan review,
+before implementation, from a bypassable `startsWith()` check to full
+`new URL()` field validation. M12 (LLM-as-judge evaluation, ADR-0016),
+M11 (Playwright end-to-end tests and CI's first real database,
+ADR-0015), M10 (API key management UI), and M9 (CSRF protection and
+login/signup rate limiting, ADR-0014) are also complete.
 
 ## Known technical debt
 
@@ -550,3 +699,27 @@ rate limiting, ADR-0014) are also complete.
   key per service, or simply expecting to wait out the quota window
   during heavy manual testing, are the two easy mitigations; neither is
   implemented yet.
+- Approving a connection in the browser and then never completing the
+  CLI token exchange leaves a permanently-`Pending` `Installation` row
+  (and its unused, eventually-expired `CliAuthorizationCode`) with no
+  automated cleanup. Harmless (a `null`-`tokenHash` row can never
+  authenticate anything), just not swept up; a person can revoke it
+  manually from the Connected Applications panel. See ADR-0017.
+- `--project <id>` CLI preselection isn't implemented: making it
+  actually skip the project picker would require the M14 authorize page
+  to read a new `project_id` query param, an `apps/web` change M15
+  wasn't scoped to make. Every `connect` run shows the picker even if
+  the caller already knows which project they want. See ADR-0018.
+- `agenttrace disconnect` only revokes the credential locally (removes
+  it from `.env`); there is no Bearer-token self-revoke endpoint, so a
+  full server-side revocation still needs the dashboard's Connected
+  Applications panel. Building one would pull CLI scope back into
+  `apps/api`'s territory, which M13 already closed. See ADR-0018.
+- `agenttrace whoami`/`status` can show a project's id but not its
+  human-readable name, since nothing exposes that to a
+  non-session-authenticated caller today.
+- M14's Playwright suite covers the approve-and-redirect flow and the
+  Connected Applications panel's Pending/Connected/Revoked lifecycle,
+  not every edge case (e.g. concurrent approvals of the same
+  authorization code). A reasonable, scoped follow-up, not part of this
+  milestone.
