@@ -1,0 +1,39 @@
+{
+  "name": "@agenttrace/cli",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "agenttrace": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/bin.js --external:open && tsc -p tsconfig.json --emitDeclarationOnly",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "open": "^8.4.2"
+  },
+  "devDependencies": {
+    "@agenttrace/sdk": "workspace:*",
+    "@agenttrace/shared-types": "workspace:*",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.24.2",
+    "jest": "^30.0.0",
+    "ts-jest": "^29.2.5",
+    "tsx": "^4.23.1",
+    "typescript": "^5.7.3"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "testEnvironment": "node"
+  }
+}
