@@ -1,4 +1,4 @@
-import type { ApiKeyRecord } from '@agenttrace/shared-types';
+import type { ApiKeyRecord } from '@agenttraceai/shared-types';
 import type { ApiKey } from '../../generated/prisma/client.js';
 
 // Same reasoning as toTraceRecord/toSpanRecord (ADR-0011): an explicit

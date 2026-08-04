@@ -1,10 +1,23 @@
 {
-  "name": "@agenttrace/cli",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@agenttraceai/cli",
+  "version": "0.1.1",
+  "description": "Connect a project to AgentTrace: agenttrace init, connect, whoami, disconnect, test.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimra-syed/agenttrace.git",
+    "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "agenttrace": "./dist/bin.js"
   },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/bin.js --external:open && tsc -p tsconfig.json --emitDeclarationOnly",
     "typecheck": "tsc --noEmit",
@@ -14,8 +27,8 @@
     "open": "^8.4.2"
   },
   "devDependencies": {
-    "@agenttrace/sdk": "workspace:*",
-    "@agenttrace/shared-types": "workspace:*",
+    "@agenttraceai/sdk": "workspace:*",
+    "@agenttraceai/shared-types": "workspace:*",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
     "esbuild": "^0.24.2",

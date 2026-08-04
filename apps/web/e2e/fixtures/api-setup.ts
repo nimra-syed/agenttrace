@@ -3,7 +3,7 @@ import type {
   CliAuthorizeResponse,
   CreateApiKeyResponse,
   ProjectRecord,
-} from "@agenttrace/shared-types";
+} from "@agenttraceai/shared-types";
 import { uniqueEmail, uniqueName } from "./unique";
 
 // A fixed, real password, not itself under test here -- auth.spec.ts

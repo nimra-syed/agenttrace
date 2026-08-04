@@ -1,6 +1,6 @@
 "use client";
 
-import type { EvalResultRecord } from "@agenttrace/shared-types";
+import type { EvalResultRecord } from "@agenttraceai/shared-types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError, listEvaluations, triggerEvaluation } from "@/lib/api";

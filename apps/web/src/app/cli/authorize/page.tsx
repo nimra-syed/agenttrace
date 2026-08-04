@@ -1,6 +1,6 @@
 "use client";
 
-import type { CliAuthorizePayload } from "@agenttrace/shared-types";
+import type { CliAuthorizePayload } from "@agenttraceai/shared-types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";

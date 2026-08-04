@@ -273,7 +273,7 @@ string concatenation, so existing query params on the caller-supplied
 derived client-side from the already-exposed `lastUsedAt`/`revokedAt`
 fields, no new backend field needed.
 
-M15 builds the actual `@agenttrace/cli` package (`agenttrace connect`,
+M15 builds the actual `@agenttraceai/cli` package (`agenttrace connect`,
 `whoami`/`status`, `disconnect`, `test`), the first package in this
 monorepo that needs a real build step, see ADR-0018. `packages/sdk` and
 `packages/shared-types` ship raw TypeScript, fine for in-monorepo
@@ -282,7 +282,7 @@ dist/bin.js` process outside the monorepo can't `require()` raw `.ts`,
 confirmed live when a first, plain-`tsc` build failed immediately with
 `SyntaxError: Unexpected identifier`. Fixed by bundling with esbuild
 (`--bundle --platform=node --format=cjs`), which inlines
-`@agenttrace/sdk`/`@agenttrace/shared-types` directly into
+`@agenttraceai/sdk`/`@agenttraceai/shared-types` directly into
 `dist/bin.js`; both packages moved from `dependencies` to
 `devDependencies` since the published CLI doesn't need them at runtime
 once bundled. `connect` generates a PKCE verifier/challenge and `state`,
@@ -302,6 +302,30 @@ a real hang traced (by elimination, not guessed) to Node's built-in
 fetch leaving an idle keep-alive socket open past the CLI's actual
 work.
 
+M16 renames and actually publishes the SDK and CLI to npm, found
+necessary live while starting M17's own dependency-install
+verification: `@agenttrace`, the scope M15 assumed this project owned,
+turned out to belong to an unrelated organization, and even the
+unscoped fallbacks (`agenttrace-sdk`, `agenttrace-cli`) were already
+real, unrelated published packages. Renamed to `@agenttraceai/sdk` and
+`@agenttraceai/cli`, an npm organization confirmed live to be actually
+available and owned by this project. `packages/sdk` got a real build
+for the first time (esbuild for the runtime, `dts-bundle-generator` for
+a self-contained declaration file with `packages/shared-types`' types
+inlined, so an external consumer never needs that package published
+separately). A root `LICENSE` (MIT) was added, copied into both
+publishable packages since npm only packages files that exist inside
+the publishing package's own directory. See ADR-0019. A real bug was
+found and fixed during this milestone's own publish verification (not
+the reported one): `bin.ts` didn't treat `--help`/`-h` as a real flag,
+so it printed usage correctly but exited `1` instead of `0`; fixed with
+an exported, pure `usageExitCode()` and shipped as `@agenttraceai/cli@0.1.1`.
+A separately-reported "npm removed the bin entry" publish warning could
+not be reproduced against what was actually live on the registry (the
+real, live manifest had the correct `bin` field both times), and was
+deliberately not chased further once direct verification confirmed the
+published package worked correctly either way.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -318,6 +342,20 @@ work.
   real build output instead of raw TypeScript: it's bundled with esbuild
   so it can run standalone (`node dist/bin.js`) outside the monorepo,
   with no TypeScript tooling of its own available. See ADR-0018.
+- `packages/sdk` (M16) also has a real build now: esbuild for the
+  runtime (`dist/index.js`, zero runtime dependencies), `dts-bundle-generator`
+  for a self-contained `dist/index.d.ts` with `packages/shared-types`'
+  definitions inlined directly, since an externally-published SDK can't
+  rely on a `workspace:*` dependency resolving. `packages/shared-types`
+  itself still ships raw TypeScript, workspace-only, never published.
+  See ADR-0019.
+- `packages/sdk` and `packages/cli` are published to npm under the
+  `@agenttraceai` scope (not `@agenttrace`, which belongs to an
+  unrelated organization, found live at M16, see ADR-0019). Both have a
+  real `LICENSE` file (MIT) and `repository` field; the actual
+  `npm publish` step always needs a browser-based OTP step neither
+  `npm whoami` nor an existing session satisfies on its own, and is
+  never something to attempt to complete on someone else's behalf.
 
 ## Commands
 
@@ -343,9 +381,9 @@ The first time you run e2e tests locally, install the browser once:
 and has its own setup, run, test, and lint commands, documented in
 `apps/eval-worker/README.md`.
 
-`packages/cli` has its own build (`pnpm --filter @agenttrace/cli
+`packages/cli` has its own build (`pnpm --filter @agenttraceai/cli
 build`, esbuild bundling `dist/bin.js` plus a `tsc --emitDeclarationOnly`
-pass for types) and test (`pnpm --filter @agenttrace/cli test`) commands,
+pass for types) and test (`pnpm --filter @agenttraceai/cli test`) commands,
 documented in `packages/cli/README.md`. Running the CLI itself against a
 real target application, once built: `node packages/cli/dist/bin.js
 connect` from that application's own directory.
@@ -535,42 +573,49 @@ live, manual CLI run against a throwaway directory was for instead.
 
 ## Current milestone
 
-M15 complete: `@agenttrace/cli`, the real `agenttrace connect` flow, and
-the last of the three milestones (M13/M14/M15) that built self-service
-CLI onboarding end to end (`docs/architecture/cli-onboarding-design.md`,
-ADR-0017, ADR-0018). `connect` genuinely opens a browser, runs a real
-loopback listener on `127.0.0.1`, exchanges a real authorization code
-plus PKCE verifier for a real credential at `/cli/token`, writes
-`AGENTTRACE_API_KEY`/`AGENTTRACE_BASE_URL` into a target application's
-`.env` (prompting before overwriting existing values unless `--force`),
-and sends a real SDK smoke trace. `packages/cli` is the first package in
-this monorepo that needs a real build (esbuild bundling, since a plain
-`node dist/bin.js` process outside the monorepo can't `require()`
-`packages/sdk`/`packages/shared-types`'s raw TypeScript, found live when
-a first plain-`tsc` attempt failed immediately). Verified against a
-real, separate throwaway application directory, not just unit tests:
-`connect`, `whoami`, `test`, and `disconnect` were each run for real
-against a live backend, with a real browser approval in the loop and
-real cleanup afterward (including revoking a connection exposed once,
-by accident, in debugging terminal output, disclosed and remediated the
-same turn per this project's own credential-hygiene rule). Two real bugs
-were found and fixed during this milestone: a process hang traced by
-elimination to Node's built-in fetch keeping an idle socket open past
-the CLI's actual work (fixed with an explicit `process.exit()`), and a
-CRLF line-ending bug in the hand-rolled `.env` editor found during
-review and closed with 8 new tests before shipping, not left as debt.
+M16 complete: the SDK and CLI are real, live, publicly published npm
+packages for the first time (`@agenttraceai/sdk@0.1.0`,
+`@agenttraceai/cli@0.1.1`), see ADR-0019. Started as a rename after
+discovering, live, that `@agenttrace` (assumed at M15) belongs to an
+unrelated organization, and grew into the actual prerequisites for
+publishing anything real: `packages/sdk` got a build for the first
+time (esbuild for the runtime, `dts-bundle-generator` to inline
+`packages/shared-types`' definitions into a self-contained declaration
+file rather than publishing a second package), and a root `LICENSE`
+(MIT) was added and copied into both publishable packages. Every
+functional reference across the monorepo (~15 files) was renamed and
+re-verified: typecheck across all 7 workspace projects, every affected
+package's test suite, and a full build, all clean after the rename.
+Both packages were verified end to end from completely clean external
+directories against the real, live registry, not just local dry runs:
+a fresh `npm install @agenttraceai/sdk` resolving to real, working code,
+and `npx @agenttraceai/cli@0.1.1 --help`/`-h`/an unknown command
+returning exit codes `0`/`0`/`1` respectively. `npm publish` itself
+needed a browser-based one-time-password step neither an active login
+session nor `npm whoami` satisfies on its own; that step was completed
+by the project owner directly, never attempted by the assistant. A real
+bug was found and fixed during this same milestone's own verification:
+`bin.ts` never treated `--help`/`-h` as a recognized flag, so it
+printed usage correctly but exited `1` instead of `0`, shipped as the
+`0.1.1` patch with new focused tests. A separately-reported "npm
+removed the bin entry" publish warning could not be reproduced against
+what was actually live on the registry and was deliberately not chased
+once direct verification confirmed the published package worked either
+way.
 
-M14 (Connected Applications dashboard UI, the `/cli/authorize` approve
-page) and M13 (the `Installation` credential backend: schema, PKCE
-authorization-code exchange, generalized `ApiKeyGuard`,
-`Trace.installationId` provenance) are also complete, both part of the
-same three-milestone CLI-connect arc as M15. The `redirect_uri`
-validation on the M14 approve page was corrected during plan review,
-before implementation, from a bypassable `startsWith()` check to full
-`new URL()` field validation. M12 (LLM-as-judge evaluation, ADR-0016),
-M11 (Playwright end-to-end tests and CI's first real database,
-ADR-0015), M10 (API key management UI), and M9 (CSRF protection and
-login/signup rate limiting, ADR-0014) are also complete.
+M15 (`@agenttraceai/cli`'s original build, the real `agenttrace
+connect` flow) and M14 (Connected Applications dashboard UI, the
+`/cli/authorize` approve page) and M13 (the `Installation` credential
+backend: schema, PKCE authorization-code exchange, generalized
+`ApiKeyGuard`, `Trace.installationId` provenance) are also complete,
+the three-milestone CLI-connect arc M16 built on top of
+(`docs/architecture/cli-onboarding-design.md`, ADR-0017, ADR-0018). The
+`redirect_uri` validation on the M14 approve page was corrected during
+plan review, before implementation, from a bypassable `startsWith()`
+check to full `new URL()` field validation. M12 (LLM-as-judge
+evaluation, ADR-0016), M11 (Playwright end-to-end tests and CI's first
+real database, ADR-0015), M10 (API key management UI), and M9 (CSRF
+protection and login/signup rate limiting, ADR-0014) are also complete.
 
 ## Known technical debt
 
@@ -723,3 +768,14 @@ login/signup rate limiting, ADR-0014) are also complete.
   not every edge case (e.g. concurrent approvals of the same
   authorization code). A reasonable, scoped follow-up, not part of this
   milestone.
+- `agenttrace init` (`packages/cli/src/commands/init.ts`,
+  `docs/architecture/cli-init-design.md`) is implemented, unit-tested,
+  and already shipped in the published CLI (it's in `0.1.1` right now,
+  since M16's rename/republish work happened in the same working tree
+  before this feature's own milestone was formally closed out). It
+  hasn't yet been through the dedicated live, end-to-end verification
+  the design doc's own acceptance criteria call for (a real throwaway
+  JS project and a real TypeScript project, each starting from nothing),
+  and has no learning-journal entry or ADR of its own yet. That
+  verification and documentation is M17's actual remaining scope, not a
+  fresh implementation.

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { AgentTraceClient } from '@agenttrace/sdk';
+import { AgentTraceClient } from '@agenttraceai/sdk';
 import { fetchIssue, fetchReadme } from './github.js';
 import { analyzeIssue, DEFAULT_MODEL, PROVIDER } from './llm.js';
 import { estimateCostUsd } from './pricing.js';

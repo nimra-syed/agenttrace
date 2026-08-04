@@ -7,7 +7,7 @@ import type {
   CliAuthorizeResponse,
   CliTokenExchangeResponse,
   InstallationRecord,
-} from '@agenttrace/shared-types';
+} from '@agenttraceai/shared-types';
 import { hashToken } from '../common/hash-token.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';

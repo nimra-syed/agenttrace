@@ -1,4 +1,4 @@
-import type { CliTokenExchangePayload } from '@agenttrace/shared-types';
+import type { CliTokenExchangePayload } from '@agenttraceai/shared-types';
 import { IsString, MinLength } from 'class-validator';
 
 export class CliTokenExchangeDto implements CliTokenExchangePayload {

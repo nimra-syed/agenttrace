@@ -1,4 +1,4 @@
-import type { CreateApiKeyPayload } from '@agenttrace/shared-types';
+import type { CreateApiKeyPayload } from '@agenttraceai/shared-types';
 import { IsString, MinLength } from 'class-validator';
 
 // `implements CreateApiKeyPayload` is a compile-time shape check only,

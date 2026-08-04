@@ -3,7 +3,7 @@ import type {
   CreateTracePayload,
   SpanRecord,
   TraceRecord,
-} from '@agenttrace/shared-types';
+} from '@agenttraceai/shared-types';
 
 export interface HttpTransportOptions {
   apiKey: string;

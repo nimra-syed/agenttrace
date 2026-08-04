@@ -1,4 +1,4 @@
-import type { InstallationRecord } from '@agenttrace/shared-types';
+import type { InstallationRecord } from '@agenttraceai/shared-types';
 import type { Installation } from '../../generated/prisma/client.js';
 
 // Same reasoning as toApiKeyRecord/toTraceRecord (ADR-0011): an

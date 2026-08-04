@@ -1,6 +1,6 @@
 "use client";
 
-import type { InstallationRecord } from "@agenttrace/shared-types";
+import type { InstallationRecord } from "@agenttraceai/shared-types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { listInstallations, me, revokeInstallation } from "@/lib/api";

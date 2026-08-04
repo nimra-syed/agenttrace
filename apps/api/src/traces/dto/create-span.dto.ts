@@ -1,4 +1,4 @@
-import type { CreateSpanPayload } from '@agenttrace/shared-types';
+import type { CreateSpanPayload } from '@agenttraceai/shared-types';
 import {
   IsEnum,
   IsISO8601,

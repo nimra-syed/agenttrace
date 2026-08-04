@@ -14,7 +14,7 @@ import type {
   ProjectRecord,
   SignupPayload,
   TraceDetailResponse,
-} from "@agenttrace/shared-types";
+} from "@agenttraceai/shared-types";
 
 export class ApiError extends Error {
   constructor(

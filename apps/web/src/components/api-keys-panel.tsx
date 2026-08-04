@@ -1,6 +1,6 @@
 "use client";
 
-import type { ApiKeyRecord, CreateApiKeyResponse } from "@agenttrace/shared-types";
+import type { ApiKeyRecord, CreateApiKeyResponse } from "@agenttraceai/shared-types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { FormField } from "./form-field";

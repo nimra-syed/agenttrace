@@ -1,4 +1,4 @@
-import { AgentTraceClient } from "@agenttrace/sdk";
+import { AgentTraceClient } from "@agenttraceai/sdk";
 import { readEnvValue } from "../lib/env-file.js";
 import { deriveLabel } from "../lib/label.js";
 import { ConnectionInvalidError, verifyConnection } from "../lib/verify-connection.js";

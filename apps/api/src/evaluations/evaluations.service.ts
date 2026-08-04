@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { EvalResultRecord } from '@agenttrace/shared-types';
+import type { EvalResultRecord } from '@agenttraceai/shared-types';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';

@@ -1,4 +1,4 @@
-import type { SpanType } from '@agenttrace/shared-types';
+import type { SpanType } from '@agenttraceai/shared-types';
 import { normalizeError } from './errors.js';
 import { HttpTransport } from './http.js';
 

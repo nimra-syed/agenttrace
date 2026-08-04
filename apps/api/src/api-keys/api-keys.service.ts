@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
   ApiKeyRecord,
   CreateApiKeyResponse,
-} from '@agenttrace/shared-types';
+} from '@agenttraceai/shared-types';
 import { hashToken } from '../common/hash-token.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';

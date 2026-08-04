@@ -3,7 +3,7 @@ import type {
   ListTracesResponse,
   TraceDetailResponse,
   TraceRecord,
-} from '@agenttrace/shared-types';
+} from '@agenttraceai/shared-types';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { TraceStatus } from '../../generated/prisma/client.js';
 import { toJsonInput } from '../common/json-input.util';

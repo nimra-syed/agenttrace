@@ -1,4 +1,4 @@
-import type { CliAuthorizePayload } from '@agenttrace/shared-types';
+import type { CliAuthorizePayload } from '@agenttraceai/shared-types';
 import { IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CliAuthorizeDto implements CliAuthorizePayload {

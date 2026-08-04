@@ -1,4 +1,4 @@
-import type { EvalResultRecord } from '@agenttrace/shared-types';
+import type { EvalResultRecord } from '@agenttraceai/shared-types';
 import type { EvalResult } from '../../generated/prisma/client.js';
 
 // Same reasoning as toTraceRecord/toSpanRecord/toApiKeyRecord (ADR-0011):

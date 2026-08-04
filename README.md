@@ -90,7 +90,7 @@ curl -H "Authorization: Bearer <key>" -X POST localhost:3000/traces \
 ## Using the SDK
 
 ```ts
-import { AgentTraceClient } from '@agenttrace/sdk';
+import { AgentTraceClient } from '@agenttraceai/sdk';
 
 const client = new AgentTraceClient({ apiKey, baseUrl: 'http://localhost:3000' });
 

@@ -1,5 +1,138 @@
 # Learning Journal
 
+## M16 — Publishing the SDK and CLI to npm as @agenttraceai (2026-08-04)
+
+### What I built
+
+- A rename of three packages from the `@agenttrace` scope (which turned
+  out to belong to an unrelated organization) to `@agenttraceai`, a new
+  npm organization confirmed live to be actually available and owned by
+  me, applied consistently across every functional reference in the
+  monorepo, roughly 15 files.
+- A real build for `packages/sdk` for the first time: esbuild for a
+  dependency-free runtime bundle, `dts-bundle-generator` to inline
+  `packages/shared-types`' type definitions into one self-contained
+  declaration file, so the published SDK never needs that package
+  published separately.
+- A root `LICENSE` (MIT), copied into both publishable packages, plus
+  real `license`/`repository` metadata.
+- The actual, real, public npm publish of `@agenttraceai/sdk@0.1.0` and
+  `@agenttraceai/cli@0.1.1` (a patch released the same day, for a real
+  bug found during the CLI's own publish verification), each verified
+  end to end from a completely clean external directory against the
+  live registry, not just locally.
+
+### What I learned
+
+- An assumption made at one milestone can quietly become load-bearing
+  for a later one without anyone re-checking it. M15 assumed
+  `@agenttrace` was this project's own scope; nothing forced that
+  assumption to be tested until M17's own live verification actually
+  tried to install the real package and got someone else's code back.
+  The lesson isn't "check every assumption forever," it's noticing which
+  assumptions a later milestone is quietly relying on being still true.
+- `npm whoami` succeeding is not the same fact as "this session can
+  publish." Both a fresh login and a long-standing one can still hit a
+  `403` requiring a separate, browser-based one-time-password step for
+  the actual publish action, specifically for 2FA-enabled accounts.
+  Worth knowing before assuming a login step alone clears the way.
+- A locally-printed npm warning is not proof of what actually happened
+  on the registry. `"bin[agenttrace]" script name ... was invalid and
+  removed` printed on every single publish attempt, including one that
+  failed with `EOTP` before any upload completed, yet the real,
+  live registry manifest had the correct `bin` field every time I
+  checked it directly. The warning fires locally, unconditionally,
+  seemingly disconnected from the actual result; trusting the real,
+  externally-verified outcome over a locally-printed message turned out
+  to matter here.
+- Type-only imports (`import type`) are erased entirely during
+  compilation, which means a package can depend on another purely for
+  types without ever needing that dependency resolvable at runtime.
+  That's exactly why `packages/sdk`'s runtime bundle never needed
+  `packages/shared-types` published at all; only the declaration output
+  did, and only because `tsc` doesn't inline cross-package type
+  references on its own.
+
+### Decisions made
+
+- ADR-0019: the `@agenttraceai` scope; renaming `shared-types` too for
+  internal consistency even though it's never published; bundling
+  shared-types' definitions into `sdk`'s own declaration output with
+  `dts-bundle-generator` instead of publishing a second package; MIT as
+  the license; the exact publish order and gating the project owner
+  specified (SDK published and verified live before the CLI); fixing
+  the `--help`/`-h` exit-code bug as its own same-day patch rather than
+  folding it into the rename itself.
+
+### Problems encountered and how we resolved them
+
+- A live `npm install` of the assumed `@agenttrace/sdk` package name
+  succeeded, but resolved to a real, unrelated package under a
+  different GitHub account. Found by reading the installed
+  `package.json` directly instead of trusting a successful exit code;
+  led to checking the unscoped fallback names too, both of which turned
+  out to already be taken by yet other unrelated projects.
+- The first `npm publish` attempt for `@agenttraceai/sdk` returned a
+  `403` requiring 2FA, even with a valid, freshly-verified login
+  session. Resolved by the project owner completing the browser-based
+  OTP step directly; I never attempted to handle that step myself, per
+  this project's own credential-handling rule.
+- After the CLI's first publish, `--help`/`-h` were found to exit `1`
+  instead of `0`, despite printing correct usage text. Fixed with an
+  exported, pure `usageExitCode()` function and 4 new tests, verified
+  against a real packed tarball in a clean directory before the
+  `0.1.1` publish, then again against the live registry package after.
+- A `bin[agenttrace] ... was invalid and removed` warning appeared on
+  every publish attempt, including a failed one. Rather than assume it
+  meant the published package was broken, checked the actual registry
+  manifest directly both times; it was correct both times. Concluded
+  the warning doesn't reliably reflect the real outcome and stopped
+  chasing it once direct, repeated, live verification contradicted it.
+
+### Interview questions I should be able to answer
+
+- Walk through exactly how you discovered the npm scope collision, and
+  why a successful `npm install` didn't already tell you something was
+  wrong.
+- Why does `import type` matter for whether a package needs its
+  dependency published separately, and how does that interact with a
+  declaration-file bundler versus a plain `tsc` build?
+- What's the actual difference between being logged into npm and being
+  able to publish, and why did that only show up at publish time, not
+  login time?
+- Why trust a live registry check over a locally-printed CLI warning,
+  and what would have to be true for that judgment call to be wrong?
+- What would you do differently if this collision had been discovered
+  after `agenttrace init` was already in wide use, instead of during
+  its own pre-release verification?
+
+### Common mistakes engineers make here
+
+- Assuming a scope, package name, or organization is available without
+  checking it live against the actual registry, especially when the
+  name is generic or obvious enough that others may have already
+  reached for it.
+- Treating a successful command (a `npm install` that exits 0, an
+  `npm whoami` that returns a username) as proof of the specific thing
+  you actually care about, instead of the narrower thing it actually
+  confirmed.
+- Reacting to every CLI warning as if it's ground truth, instead of
+  checking the actual, externally-verifiable outcome when the two
+  seem to disagree.
+- Publishing a package with no license declared, leaving it at npm's
+  default of "all rights reserved" by accident rather than by choice.
+
+### How this milestone improves my resume
+
+"Discovered a real npm namespace collision during pre-release
+verification (not after a real user hit it), migrated three packages
+to a new, verified-available scope with a full re-verification of the
+entire blast radius, added a real build step and self-contained type
+bundling for a package that had never needed one before, and shipped a
+same-day patch release for a bug found during the package's own
+publish verification" is a specific, verifiable claim about release
+engineering discipline, not just "published a package to npm."
+
 ## M15 — `@agenttrace/cli` and the real connect flow (2026-08-02)
 
 ### What I built

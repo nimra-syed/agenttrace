@@ -1,4 +1,4 @@
-import type { TraceRecord } from "@agenttrace/shared-types";
+import type { TraceRecord } from "@agenttraceai/shared-types";
 import Link from "next/link";
 
 // Exported so the trace detail page (M8) formats duration, cost, and

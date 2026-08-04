@@ -8,7 +8,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import type { ListTracesQuery } from '@agenttrace/shared-types';
+import type { ListTracesQuery } from '@agenttraceai/shared-types';
 import { TraceStatus } from '../../../generated/prisma/client.js';
 
 const DEFAULT_LIMIT = 20;

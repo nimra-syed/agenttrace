@@ -1,4 +1,4 @@
-import type { SpanRecord, TraceRecord } from "@agenttrace/shared-types";
+import type { SpanRecord, TraceRecord } from "@agenttraceai/shared-types";
 import { CollapsiblePayload } from "./collapsible-payload";
 
 interface SpanNode {

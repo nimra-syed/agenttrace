@@ -1,6 +1,6 @@
 "use client";
 
-import type { TraceStatus } from "@agenttrace/shared-types";
+import type { TraceStatus } from "@agenttraceai/shared-types";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";

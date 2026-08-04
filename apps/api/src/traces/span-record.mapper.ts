@@ -1,4 +1,4 @@
-import type { SpanRecord } from '@agenttrace/shared-types';
+import type { SpanRecord } from '@agenttraceai/shared-types';
 import type { Span } from '../../generated/prisma/client.js';
 
 // Same reasoning as toTraceRecord: Prisma's Decimal (costUsd) serializes

@@ -1,4 +1,4 @@
-import type { TraceRecord } from '@agenttrace/shared-types';
+import type { TraceRecord } from '@agenttraceai/shared-types';
 import type { Trace } from '../../generated/prisma/client.js';
 
 // Prisma's Trace model uses Date (not string) and Decimal (not number)

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import type { SpanRecord } from '@agenttrace/shared-types';
+import type { SpanRecord } from '@agenttraceai/shared-types';
 import { SpanStatus } from '../../generated/prisma/client.js';
 import { toJsonInput } from '../common/json-input.util';
 import { toDateOrPassthrough } from '../common/optional-date.util';
