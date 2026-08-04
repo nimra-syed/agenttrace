@@ -326,6 +326,37 @@ real, live manifest had the correct `bin` field both times), and was
 deliberately not chased further once direct verification confirmed the
 published package worked correctly either way.
 
+M17 builds `agenttrace init`, composing the connect flow and smoke
+trace M13-M15 already built with two new pieces: dependency
+installation (`lib/package-manager.ts`) and scaffold generation
+(`lib/scaffold.ts`, generating `agenttrace.ts`/`.js` and
+`agenttrace.example.ts`/`.js`), so a developer ends up with a working,
+connected SDK setup and a real example to copy from, not just a
+credential. See ADR-0020 and `docs/architecture/cli-init-design.md`.
+`init` detects what's actually missing (the SDK dependency, a working
+connection, either scaffold file) and shows one upfront plan built from
+that real state, not a static list; scaffold files skip-by-default if
+they already exist (`--force` to regenerate). Two real bugs were found
+during this milestone's own live verification, neither caught by the
+unit tests written when the feature was first implemented: plain `node`
+never loads `.env` on its own (a framework convenience, not Node
+behavior), so the generated client crashed the moment the CLI's own
+advertised "run this to try it now" step was followed; fixed by having
+the generated file call `dotenv.config()` itself and having `init`
+install `dotenv` alongside the SDK. A real Node ESM resolution rule
+(relative imports need an explicit extension, unlike `require()`, which
+tries several automatically) meant the generated ESM example's import
+of its own client file threw `ERR_MODULE_NOT_FOUND`; found by a new,
+deliberately heavier test (`scaffold-runtime.spec.ts`) that actually
+runs the generated content through a real `tsc`/`node`, not just a
+string-content assertion, written specifically to catch the first bug
+and catching a second, unrelated one in the process.
+`AgentTraceClient`'s constructor now validates `apiKey`/`baseUrl` and
+throws a clear error instead of reaching `.replace()` on `undefined`
+three calls deep, since a caller building options from `process.env`
+(exactly what the generated scaffold does) can still get `undefined`
+at runtime despite what the type claims.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -573,42 +604,41 @@ live, manual CLI run against a throwaway directory was for instead.
 
 ## Current milestone
 
-M16 complete: the SDK and CLI are real, live, publicly published npm
-packages for the first time (`@agenttraceai/sdk@0.1.0`,
-`@agenttraceai/cli@0.1.1`), see ADR-0019. Started as a rename after
-discovering, live, that `@agenttrace` (assumed at M15) belongs to an
-unrelated organization, and grew into the actual prerequisites for
-publishing anything real: `packages/sdk` got a build for the first
-time (esbuild for the runtime, `dts-bundle-generator` to inline
-`packages/shared-types`' definitions into a self-contained declaration
-file rather than publishing a second package), and a root `LICENSE`
-(MIT) was added and copied into both publishable packages. Every
-functional reference across the monorepo (~15 files) was renamed and
-re-verified: typecheck across all 7 workspace projects, every affected
-package's test suite, and a full build, all clean after the rename.
-Both packages were verified end to end from completely clean external
-directories against the real, live registry, not just local dry runs:
-a fresh `npm install @agenttraceai/sdk` resolving to real, working code,
-and `npx @agenttraceai/cli@0.1.1 --help`/`-h`/an unknown command
-returning exit codes `0`/`0`/`1` respectively. `npm publish` itself
-needed a browser-based one-time-password step neither an active login
-session nor `npm whoami` satisfies on its own; that step was completed
-by the project owner directly, never attempted by the assistant. A real
-bug was found and fixed during this same milestone's own verification:
-`bin.ts` never treated `--help`/`-h` as a recognized flag, so it
-printed usage correctly but exited `1` instead of `0`, shipped as the
-`0.1.1` patch with new focused tests. A separately-reported "npm
-removed the bin entry" publish warning could not be reproduced against
-what was actually live on the registry and was deliberately not chased
-once direct verification confirmed the published package worked either
-way.
+M17 complete: `agenttrace init` actually delivers what it advertises,
+verified live end to end, see ADR-0020. Composes the connect flow and
+smoke trace (M13-M15) with dependency installation and scaffold
+generation (`agenttrace.ts`/`.js`, `agenttrace.example.ts`/`.js`), built
+earlier in the same working session as M16's rename but not verified
+live until this milestone closed it out. Two real bugs were found
+during that live verification, neither caught by the unit tests written
+when the feature was first implemented: plain `node` never loads `.env`
+on its own, so the generated client crashed the moment the CLI's own
+advertised "run this to try it now" step was followed (fixed with
+`dotenv.config()` in the generated file and `init` installing `dotenv`
+alongside the SDK); and the generated ESM example's extensionless
+relative import threw a real `ERR_MODULE_NOT_FOUND` under Node's actual
+ESM resolution rules (fixed with an explicit `.js` extension for that
+case). The second bug was caught by a new, deliberately heavier test
+(`scaffold-runtime.spec.ts`) written specifically to catch the first
+one: it runs generated scaffold content through a real `tsc`/`node`,
+with a real `.env` file, not a string-content assertion. Re-verified
+end to end afterward from two brand-new throwaway directories (JS and
+TS), both real example files running successfully this time, both
+idempotent on a second run. `packages/cli@0.1.2` and
+`packages/sdk@0.1.1` (a new constructor validation that fails loud on a
+missing `apiKey`/`baseUrl` instead of crashing three calls deep) are
+built and locally verified but not yet published, at the project
+owner's request pending their own review.
 
-M15 (`@agenttraceai/cli`'s original build, the real `agenttrace
-connect` flow) and M14 (Connected Applications dashboard UI, the
-`/cli/authorize` approve page) and M13 (the `Installation` credential
-backend: schema, PKCE authorization-code exchange, generalized
-`ApiKeyGuard`, `Trace.installationId` provenance) are also complete,
-the three-milestone CLI-connect arc M16 built on top of
+M16 (the SDK and CLI's real, live npm publish under `@agenttraceai`
+after discovering `@agenttrace` belonged to an unrelated organization,
+`packages/sdk`'s first real build, MIT licensing, ADR-0019), M15
+(`@agenttraceai/cli`'s original build, the real `agenttrace connect`
+flow), M14 (Connected Applications dashboard UI, the `/cli/authorize`
+approve page), and M13 (the `Installation` credential backend: schema,
+PKCE authorization-code exchange, generalized `ApiKeyGuard`,
+`Trace.installationId` provenance) are also complete, the
+onboarding/publishing arc this milestone builds on top of
 (`docs/architecture/cli-onboarding-design.md`, ADR-0017, ADR-0018). The
 `redirect_uri` validation on the M14 approve page was corrected during
 plan review, before implementation, from a bypassable `startsWith()`
@@ -768,14 +798,8 @@ protection and login/signup rate limiting, ADR-0014) are also complete.
   not every edge case (e.g. concurrent approvals of the same
   authorization code). A reasonable, scoped follow-up, not part of this
   milestone.
-- `agenttrace init` (`packages/cli/src/commands/init.ts`,
-  `docs/architecture/cli-init-design.md`) is implemented, unit-tested,
-  and already shipped in the published CLI (it's in `0.1.1` right now,
-  since M16's rename/republish work happened in the same working tree
-  before this feature's own milestone was formally closed out). It
-  hasn't yet been through the dedicated live, end-to-end verification
-  the design doc's own acceptance criteria call for (a real throwaway
-  JS project and a real TypeScript project, each starting from nothing),
-  and has no learning-journal entry or ADR of its own yet. That
-  verification and documentation is M17's actual remaining scope, not a
-  fresh implementation.
+- `packages/cli@0.1.2` and `packages/sdk@0.1.1` (the `agenttrace init`
+  fixes, see ADR-0020) are built, tested, and locally verified but not
+  yet published, at the project owner's explicit request pending their
+  own review of the release. `0.1.1`/`0.1.0` remain the versions
+  actually live on npm until that publish happens.

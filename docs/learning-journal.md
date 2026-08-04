@@ -1,5 +1,126 @@
 # Learning Journal
 
+## M17 — Making `agenttrace init` actually work (2026-08-04)
+
+### What I built
+
+- Live, end-to-end verification of `agenttrace init` (implemented
+  earlier in the same working session as M16, but never run for real
+  against a fresh project until this milestone), against two brand-new
+  throwaway directories, one plain JavaScript/CommonJS, one TypeScript.
+- Two real fixes found during that verification: the generated
+  `agenttrace.ts`/`.js` now loads `.env` itself via `dotenv` before
+  constructing the client, and `init` installs `dotenv` alongside the
+  SDK; the generated ESM example's relative import now has the
+  explicit `.js` extension real Node ESM resolution requires.
+- A new constructor validation in `AgentTraceClient` (`packages/sdk`)
+  that throws a clear, actionable error when `apiKey`/`baseUrl` are
+  missing, instead of crashing three calls deep inside `HttpTransport`.
+- A new, deliberately heavier test file (`scaffold-runtime.spec.ts`)
+  that actually runs generated scaffold content through a real `tsc`
+  and a real `node`, not just checking that the generated string
+  contains an expected substring.
+
+### What I learned
+
+- A generated file can pass every test I'd written for it (correct
+  file name, correct imports present, correct exported shape) and still
+  be completely broken the moment a real person actually runs it,
+  if none of those tests ever actually execute the thing. String-content
+  assertions and real execution are testing two different claims, and
+  I'd only been making the first one.
+- Plain `node` does not load `.env` files. I knew this abstractly, but
+  didn't connect it to my own generated scaffold until watching it
+  crash for a reason that had nothing to do with the actual connection,
+  credentials, or SDK logic, just an environment variable that was
+  never populated in the first place.
+- TypeScript's own module resolution and Node's real ESM module
+  resolution are not the same thing, even for the exact same import
+  statement. Code that typechecks cleanly can still fail at runtime for
+  a reason TypeScript never had any way to catch, because the rule
+  being violated (explicit file extensions on relative ESM imports) is
+  Node's, not TypeScript's.
+- Writing a test specifically to catch one bug can catch a second,
+  completely unrelated one, if the test is built around actually doing
+  the real thing rather than checking a narrow property of it. The ESM
+  extension bug was never on my radar; it surfaced because the new test
+  ran real code instead of inspecting a string.
+
+### Decisions made
+
+- ADR-0020: fixing `agenttrace init`'s real bugs as their own
+  same-day-adjacent milestone rather than silently folding them into
+  M16's already-large rename; validating in `AgentTraceClient` rather
+  than the unexported `HttpTransport`; writing genuinely heavier
+  execution tests for generated scaffold content instead of adding more
+  string assertions to the existing fast unit tests; holding both
+  `0.1.2`/`0.1.1` publishes for the project owner's own review rather
+  than publishing immediately once verification passed.
+
+### Problems encountered and how we resolved them
+
+- `node agenttrace.example.js`, exactly the command the CLI itself
+  prints as the next step, crashed with a `TypeError` inside the SDK's
+  own `HttpTransport` constructor. Traced to `baseUrl` being
+  `undefined`, which traced further back to `.env` never actually being
+  loaded into `process.env` by plain `node`. Fixed by having the
+  generated client file load it itself via `dotenv`, matching
+  `apps/reference-agent`'s own existing, already-established pattern
+  instead of inventing a new one.
+- The new runtime test for the ESM scaffold variant failed immediately
+  with a real `ERR_MODULE_NOT_FOUND`, a bug I hadn't gone looking for.
+  Fixed by adding the `.js` extension Node's ESM resolution actually
+  requires for relative imports, verified by rerunning the exact same
+  test afterward and watching it pass.
+- After both fixes, re-ran the entire flow again from scratch (new
+  throwaway directories, a new browser approval, both scaffold formats)
+  rather than trusting the unit tests alone, and confirmed the real
+  generated example files actually run successfully this time,
+  visible as real, successful traces in the dashboard.
+
+### Interview questions I should be able to answer
+
+- Why can a test suite pass completely and the feature it's testing
+  still be broken for a real user? Walk through exactly how that
+  happened here.
+- What's the actual difference between TypeScript's module resolution
+  and Node's runtime ESM resolution, and why did one catch a bug the
+  other couldn't?
+- Why does plain `node` not load `.env` files, and what's actually
+  loading them in frameworks where it seems to "just work"?
+- Why validate `apiKey`/`baseUrl` inside `AgentTraceClient` specifically,
+  and not deeper in the call stack where the actual crash happened?
+- If you had shipped `0.1.1` without this verification and a real user
+  hit this crash, how would you have diagnosed it from their bug report
+  alone?
+
+### Common mistakes engineers make here
+
+- Treating "the generated file has the right content" and "the
+  generated file works when you run it" as the same claim, when only
+  a test that actually executes the file can verify the second one.
+- Assuming a Node.js script has access to `.env` values just because a
+  `.env` file exists in the same directory, without checking whether
+  anything actually loads it.
+- Assuming TypeScript's type-checker enforces every rule a piece of
+  code needs to follow at runtime, instead of recognizing that some
+  rules (module resolution among them) belong to the runtime, not the
+  type system.
+- Writing a fix for a reported bug and calling it done, without asking
+  whether a new test built to catch that exact bug might also catch
+  something else nearby if it's built to exercise the real thing rather
+  than a narrow symptom of it.
+
+### How this milestone improves my resume
+
+"Found that a fully-passing test suite still shipped a feature that
+crashed on first real use, root-caused it to the gap between checking
+generated content and executing it, and closed that gap by writing
+tests that run real code in a real environment rather than adding more
+string assertions, catching a second, unrelated bug in the same pass"
+is a specific, verifiable claim about testing judgment, not just "wrote
+tests."
+
 ## M16 — Publishing the SDK and CLI to npm as @agenttraceai (2026-08-04)
 
 ### What I built

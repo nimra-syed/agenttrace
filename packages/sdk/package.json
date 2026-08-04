@@ -1,6 +1,6 @@
 {
   "name": "@agenttraceai/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Instrumentation client for AgentTrace: record an AI agent's traces and spans.",
   "license": "MIT",
   "repository": {

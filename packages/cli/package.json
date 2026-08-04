@@ -1,6 +1,6 @@
 {
   "name": "@agenttraceai/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Connect a project to AgentTrace: agenttrace init, connect, whoami, disconnect, test.",
   "license": "MIT",
   "repository": {
@@ -31,6 +31,7 @@
     "@agenttraceai/shared-types": "workspace:*",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
+    "dotenv": "^17.4.2",
     "esbuild": "^0.24.2",
     "jest": "^30.0.0",
     "ts-jest": "^29.2.5",

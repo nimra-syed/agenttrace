@@ -43,18 +43,16 @@ export interface InstallCommand {
   args: string[];
 }
 
+// Accepts multiple package names so init can install everything it's
+// missing (the SDK, and dotenv for the generated scaffold to load
+// .env with) in a single network round-trip, rather than one install
+// per package.
 export function buildInstallCommand(
   manager: PackageManager,
-  packageName: string,
+  packageNames: string[],
 ): InstallCommand {
-  switch (manager) {
-    case "pnpm":
-      return { command: "pnpm", args: ["add", packageName] };
-    case "yarn":
-      return { command: "yarn", args: ["add", packageName] };
-    case "npm":
-      return { command: "npm", args: ["install", packageName] };
-  }
+  const verb = manager === "npm" ? "install" : "add";
+  return { command: manager, args: [verb, ...packageNames] };
 }
 
 export class InstallFailedError extends Error {

@@ -54,6 +54,8 @@ describe("scaffold", () => {
       expect(files[0].content).toContain(
         'import { AgentTraceClient } from "@agenttraceai/sdk"',
       );
+      expect(files[0].content).toContain('import { config } from "dotenv"');
+      expect(files[0].content).toContain("config();");
       expect(files[0].content).toContain("export const agenttrace");
       expect(files[1].fileName).toBe("agenttrace.example.ts");
       expect(files[1].content).toContain(
@@ -67,15 +69,22 @@ describe("scaffold", () => {
       expect(files[0].content).toContain(
         'import { AgentTraceClient } from "@agenttraceai/sdk"',
       );
+      expect(files[0].content).toContain('import { config } from "dotenv"');
+      expect(files[0].content).toContain("config();");
       expect(files[0].content).toContain("export const agenttrace");
+      // Explicit .js extension required here, unlike the TS case above:
+      // real Node ESM resolution has no automatic extension fallback
+      // for relative specifiers, found live (ERR_MODULE_NOT_FOUND)
+      // during M17's own verification.
       expect(files[1].content).toContain(
-        'import { agenttrace } from "./agenttrace"',
+        'import { agenttrace } from "./agenttrace.js"',
       );
     });
 
     it("generates .js files using require/module.exports for a CommonJS project", () => {
       const files = scaffoldFiles({ isTypeScript: false, isESM: false });
       expect(files[0].fileName).toBe("agenttrace.js");
+      expect(files[0].content).toContain('require("dotenv").config()');
       expect(files[0].content).toContain(
         'const { AgentTraceClient } = require("@agenttraceai/sdk")',
       );

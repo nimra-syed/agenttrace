@@ -82,23 +82,32 @@ describe("package-manager", () => {
 
   describe("buildInstallCommand", () => {
     it("builds a pnpm add command", () => {
-      expect(buildInstallCommand("pnpm", "@agenttraceai/sdk")).toEqual({
+      expect(buildInstallCommand("pnpm", ["@agenttraceai/sdk"])).toEqual({
         command: "pnpm",
         args: ["add", "@agenttraceai/sdk"],
       });
     });
 
     it("builds a yarn add command", () => {
-      expect(buildInstallCommand("yarn", "@agenttraceai/sdk")).toEqual({
+      expect(buildInstallCommand("yarn", ["@agenttraceai/sdk"])).toEqual({
         command: "yarn",
         args: ["add", "@agenttraceai/sdk"],
       });
     });
 
     it("builds an npm install command", () => {
-      expect(buildInstallCommand("npm", "@agenttraceai/sdk")).toEqual({
+      expect(buildInstallCommand("npm", ["@agenttraceai/sdk"])).toEqual({
         command: "npm",
         args: ["install", "@agenttraceai/sdk"],
+      });
+    });
+
+    it("builds a single install command covering multiple missing packages", () => {
+      expect(
+        buildInstallCommand("npm", ["@agenttraceai/sdk", "dotenv"]),
+      ).toEqual({
+        command: "npm",
+        args: ["install", "@agenttraceai/sdk", "dotenv"],
       });
     });
   });

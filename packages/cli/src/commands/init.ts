@@ -34,6 +34,10 @@ export interface InitOptions {
 }
 
 const SDK_PACKAGE_NAME = "@agenttraceai/sdk";
+// The generated agenttrace.ts/.js loads .env itself via dotenv, since
+// plain `node` never does this on its own (a framework convenience,
+// not Node behavior); installed alongside the SDK for the same reason.
+const DOTENV_PACKAGE_NAME = "dotenv";
 
 // Composes the pieces M13-M15 already built (the connect flow, the
 // smoke trace) with two new ones (dependency installation, scaffold
@@ -55,7 +59,10 @@ export async function init(options: InitOptions): Promise<void> {
     return;
   }
 
-  const needsInstall = !hasDependency(cwd, SDK_PACKAGE_NAME);
+  const packagesToInstall = [SDK_PACKAGE_NAME, DOTENV_PACKAGE_NAME].filter(
+    (packageName) => !hasDependency(cwd, packageName),
+  );
+  const needsInstall = packagesToInstall.length > 0;
 
   const existingKey = readEnvValue(options.envFile, "AGENTTRACE_API_KEY");
   const existingBaseUrl = readEnvValue(options.envFile, "AGENTTRACE_BASE_URL");
@@ -86,7 +93,7 @@ export async function init(options: InitOptions): Promise<void> {
   }
 
   printPlan({
-    needsInstall,
+    packagesToInstall,
     needsConnect,
     existingProjectId: existingContext?.projectId,
     files,
@@ -104,9 +111,9 @@ export async function init(options: InitOptions): Promise<void> {
 
   if (needsInstall) {
     const manager = detectPackageManager(cwd);
-    const install = buildInstallCommand(manager, SDK_PACKAGE_NAME);
+    const install = buildInstallCommand(manager, packagesToInstall);
     console.log(
-      `Installing ${SDK_PACKAGE_NAME} (${install.command} ${install.args.join(" ")})...`,
+      `Installing ${packagesToInstall.join(", ")} (${install.command} ${install.args.join(" ")})...`,
     );
     await installDependency(cwd, install);
   }
@@ -205,14 +212,16 @@ async function resolveExistingConnection(
 }
 
 function printPlan(state: {
-  needsInstall: boolean;
+  packagesToInstall: string[];
   needsConnect: boolean;
   existingProjectId: string | undefined;
   files: { fileName: string }[];
   filesToWriteNames: Set<string>;
 }): void {
   const actionLines: string[] = [];
-  if (state.needsInstall) actionLines.push(`Install ${SDK_PACKAGE_NAME}`);
+  for (const packageName of state.packagesToInstall) {
+    actionLines.push(`Install ${packageName}`);
+  }
   if (state.needsConnect) actionLines.push("Connect this project");
   for (const file of state.files) {
     if (state.filesToWriteNames.has(file.fileName)) {
@@ -222,8 +231,10 @@ function printPlan(state: {
   actionLines.push("Send a smoke trace");
 
   const statusLines: string[] = [];
-  if (!state.needsInstall) {
-    statusLines.push(`${SDK_PACKAGE_NAME} is already installed.`);
+  for (const packageName of [SDK_PACKAGE_NAME, DOTENV_PACKAGE_NAME]) {
+    if (!state.packagesToInstall.includes(packageName)) {
+      statusLines.push(`${packageName} is already installed.`);
+    }
   }
   if (!state.needsConnect) {
     statusLines.push(`Already connected to project ${state.existingProjectId}.`);

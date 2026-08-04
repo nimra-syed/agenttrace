@@ -16,6 +16,24 @@ export class AgentTraceClient {
   private readonly http: HttpTransport;
 
   constructor(options: AgentTraceClientOptions) {
+    // Checked here, not left to fail later inside HttpTransport: a
+    // missing baseUrl previously reached `.replace()` on `undefined`,
+    // a confusing crash pointing at the wrong line for whoever hit it.
+    // Both fields are required by the type, but a caller building
+    // `options` from `process.env` (exactly what the generated
+    // agenttrace.ts/.js scaffold does) can still end up with `undefined`
+    // at runtime despite what the type claims.
+    if (!options.apiKey) {
+      throw new Error(
+        "AgentTraceClient: `apiKey` is required but was empty or missing. Check that AGENTTRACE_API_KEY is set before constructing the client.",
+      );
+    }
+    if (!options.baseUrl) {
+      throw new Error(
+        "AgentTraceClient: `baseUrl` is required but was empty or missing. Check that AGENTTRACE_BASE_URL is set before constructing the client.",
+      );
+    }
+
     this.http = new HttpTransport({
       apiKey: options.apiKey,
       baseUrl: options.baseUrl,
