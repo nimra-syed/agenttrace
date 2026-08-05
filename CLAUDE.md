@@ -357,6 +357,26 @@ three calls deep, since a caller building options from `process.env`
 (exactly what the generated scaffold does) can still get `undefined`
 at runtime despite what the type claims.
 
+`apps/api/test/*.e2e-spec.ts` (M18, ADR-0021) is a NestJS integration
+suite that boots the real `AppModule` against a real Postgres and
+drives it with `supertest`, not a browser and not a mocked
+`PrismaService`. `createTestApp()` (`test/support/test-app.ts`)
+manually replicates the two things `main.ts`'s `bootstrap()` does that
+`TestingModule` doesn't inherit on its own: `cookieParser()` and the
+global `ValidationPipe`. Booting a real, connected `PrismaClient`
+inside Jest needs `NODE_OPTIONS=--experimental-vm-modules` (Prisma 7's
+driver-adapter query compiler uses a dynamic `import()` Jest's default
+transform can't run otherwise), baked into the `test:e2e` script.
+Cleanup is a plain function (`test/support/cleanup.ts`) each spec
+file's own `afterAll` calls, deliberately not Jest's `globalTeardown`
+hook: that hook bypasses this project's own configured module
+resolver, which is exactly what makes Prisma 7's `.ts`-shaped generated
+client resolvable at all elsewhere. It deletes only rows reachable from
+users tagged `@api-integration.agenttrace.test`, distinct from
+Playwright's own tag. Runs with `--runInBand`, added as an early step
+in the existing `e2e` CI job, right after migrations, before
+Playwright.
+
 ## Repository conventions
 
 - pnpm workspaces monorepo; no Turborepo/Nx until build times actually
@@ -443,12 +463,16 @@ benefits from. Locally, e2e tests expect `pnpm db:up` / `dev:api` /
 `dev:web` already running; they don't manage server lifecycle
 themselves.
 
-Still open, not part of M11: a NestJS-level API integration test suite
-(`apps/api/test/*.e2e-spec.ts`, Jest + `supertest`, no browser) is a
-different test category `nest new` scaffolded back at M0 and nothing
-has built out since — it would use the same CI database M11 just
-introduced, but building it out was explicitly kept out of this
-milestone's scope.
+`apps/api/test/*.e2e-spec.ts` (M18, see ADR-0021 and "Architecture
+overview" above for how it's built) covers auth, projects (including
+an explicit cross-org test), API keys (`ApiKeyGuard`'s uniform-401
+across all four failure modes via real requests, not just the mocked
+unit test), trace/span ingestion end to end through a real API key,
+and CSRF. Deliberately not covered yet: evaluations, the
+installations/CLI-auth PKCE flow, or throttle-limit-exhaustion beyond
+`throttler-scoping.integration.spec.ts` (see "Known technical debt").
+Run it with `pnpm --filter api test:e2e`; it expects `pnpm db:up`
+already running, same as Playwright.
 
 `apps/eval-worker`'s own test suite (`apps/eval-worker/tests/`, pytest)
 never makes a real Gemini call, same reasoning as `apps/reference-agent`
@@ -604,48 +628,41 @@ live, manual CLI run against a throwaway directory was for instead.
 
 ## Current milestone
 
-M17 complete: `agenttrace init` actually delivers what it advertises,
-verified live end to end, see ADR-0020. Composes the connect flow and
-smoke trace (M13-M15) with dependency installation and scaffold
-generation (`agenttrace.ts`/`.js`, `agenttrace.example.ts`/`.js`), built
-earlier in the same working session as M16's rename but not verified
-live until this milestone closed it out. Two real bugs were found
-during that live verification, neither caught by the unit tests written
-when the feature was first implemented: plain `node` never loads `.env`
-on its own, so the generated client crashed the moment the CLI's own
-advertised "run this to try it now" step was followed (fixed with
-`dotenv.config()` in the generated file and `init` installing `dotenv`
-alongside the SDK); and the generated ESM example's extensionless
-relative import threw a real `ERR_MODULE_NOT_FOUND` under Node's actual
-ESM resolution rules (fixed with an explicit `.js` extension for that
-case). The second bug was caught by a new, deliberately heavier test
-(`scaffold-runtime.spec.ts`) written specifically to catch the first
-one: it runs generated scaffold content through a real `tsc`/`node`,
-with a real `.env` file, not a string-content assertion. Re-verified
-end to end afterward from two brand-new throwaway directories (JS and
-TS), both real example files running successfully this time, both
-idempotent on a second run. `packages/cli@0.1.2` and
-`packages/sdk@0.1.1` (a new constructor validation that fails loud on a
-missing `apiKey`/`baseUrl` instead of crashing three calls deep) are
-built and locally verified but not yet published, at the project
-owner's request pending their own review.
+M18 complete: a real NestJS API integration test suite, closing debt
+open since M11 (see "Architecture overview" above for how it's built,
+"Testing expectations" for its coverage, and ADR-0021 for the full
+account, including the two structural Jest/Prisma problems this
+surfaced and how each verification claim below was actually checked,
+not assumed). Every claim was checked directly: `packages/sdk`'s and
+`packages/cli`'s `dist/` cleared before deciding CI placement;
+`CsrfGuard`'s real enforcement disabled to confirm the new CSRF test
+actually fails, then restored; the real dev Postgres queried afterward
+to confirm zero tagged rows remained and Playwright's own tagged rows
+were untouched. Runs as an early step in the existing `e2e` CI job,
+right after migrations, before Playwright.
 
+M17 (`agenttrace init` actually delivering what it advertises, two real
+bugs found and fixed during its own live verification -- a missing
+`dotenv` load and a Node ESM extension-resolution rule -- ADR-0020) and
 M16 (the SDK and CLI's real, live npm publish under `@agenttraceai`
 after discovering `@agenttrace` belonged to an unrelated organization,
-`packages/sdk`'s first real build, MIT licensing, ADR-0019), M15
-(`@agenttraceai/cli`'s original build, the real `agenttrace connect`
-flow), M14 (Connected Applications dashboard UI, the `/cli/authorize`
-approve page), and M13 (the `Installation` credential backend: schema,
-PKCE authorization-code exchange, generalized `ApiKeyGuard`,
-`Trace.installationId` provenance) are also complete, the
-onboarding/publishing arc this milestone builds on top of
-(`docs/architecture/cli-onboarding-design.md`, ADR-0017, ADR-0018). The
-`redirect_uri` validation on the M14 approve page was corrected during
-plan review, before implementation, from a bypassable `startsWith()`
-check to full `new URL()` field validation. M12 (LLM-as-judge
-evaluation, ADR-0016), M11 (Playwright end-to-end tests and CI's first
-real database, ADR-0015), M10 (API key management UI), and M9 (CSRF
-protection and login/signup rate limiting, ADR-0014) are also complete.
+`packages/sdk`'s first real build, MIT licensing, ADR-0019) are also
+complete; `@agenttraceai/sdk@0.1.1` and `@agenttraceai/cli@0.1.2` are
+live on npm, verified end to end from clean external directories
+against the real registry. M15 (`@agenttraceai/cli`'s original build,
+the real `agenttrace connect` flow), M14 (Connected Applications
+dashboard UI, the `/cli/authorize` approve page), and M13 (the
+`Installation` credential backend: schema, PKCE authorization-code
+exchange, generalized `ApiKeyGuard`, `Trace.installationId` provenance)
+are also complete, the onboarding/publishing arc M16/M17 built on top
+of (`docs/architecture/cli-onboarding-design.md`, ADR-0017, ADR-0018).
+The `redirect_uri` validation on the M14 approve page was corrected
+during plan review, before implementation, from a bypassable
+`startsWith()` check to full `new URL()` field validation. M12
+(LLM-as-judge evaluation, ADR-0016), M11 (Playwright end-to-end tests
+and CI's first real database, ADR-0015), M10 (API key management UI),
+and M9 (CSRF protection and login/signup rate limiting, ADR-0014) are
+also complete.
 
 ## Known technical debt
 
@@ -730,11 +747,6 @@ protection and login/signup rate limiting, ADR-0014) are also complete.
   verified safe under concurrency. Revisiting this is a reasonable
   future step once the suite is larger and that's been explicitly
   checked, not a permanent constraint. See ADR-0015.
-- `apps/api/test/*.e2e-spec.ts` (NestJS's own Jest-based API
-  integration test stub, scaffolded by `nest new` at M0) remains
-  untouched. It's a different test category from Playwright and would
-  use the same CI database M11 introduced, but building it out was
-  explicitly kept out of this milestone's scope.
 - CI's `actions/checkout@v4`, `actions/setup-node@v4`, and
   `pnpm/action-setup@v4` target a Node.js version GitHub has begun
   deprecating (runs are currently force-upgraded to Node 24
@@ -798,8 +810,16 @@ protection and login/signup rate limiting, ADR-0014) are also complete.
   not every edge case (e.g. concurrent approvals of the same
   authorization code). A reasonable, scoped follow-up, not part of this
   milestone.
-- `packages/cli@0.1.2` and `packages/sdk@0.1.1` (the `agenttrace init`
-  fixes, see ADR-0020) are built, tested, and locally verified but not
-  yet published, at the project owner's explicit request pending their
-  own review of the release. `0.1.1`/`0.1.0` remain the versions
-  actually live on npm until that publish happens.
+- The `test:e2e` suite added at M18 covers auth, projects, API keys,
+  trace/span ingestion, and CSRF, deliberately not evaluations (would
+  need mocking the real, paid eval-worker call at the HTTP boundary),
+  the installations/CLI-auth PKCE flow (already covered by its own unit
+  tests and M13's live curl verification), or throttle-limit-exhaustion
+  beyond what `throttler-scoping.integration.spec.ts` already proves.
+  Reasonable, scoped follow-ups, not silently dropped. See ADR-0021.
+- M18's integration suite runs with `--runInBand`, a deliberate,
+  conservative first-version choice (each Jest worker boots its own
+  in-process app, unlike Playwright's one shared server, so the
+  isolation story is different, but unproven under real parallel load).
+  Revisiting this once the suite has a track record is reasonable, not
+  required. See ADR-0021.

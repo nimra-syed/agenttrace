@@ -120,6 +120,19 @@ jobs:
       - name: Apply database migrations
         run: pnpm --filter api run prisma:migrate:deploy
 
+      # A real API-layer regression is caught here, before spending time
+      # on browser install and full builds. Proven, not assumed, that
+      # this doesn't need packages/sdk or packages/cli built first:
+      # apps/api depends on neither (only @agenttraceai/shared-types,
+      # which ships raw source), confirmed by clearing both packages'
+      # dist/ and running apps/api's test suite and typecheck with
+      # neither present -- both passed clean. See ADR-0021 for why this
+      # needs --experimental-vm-modules (Prisma 7's driver-adapter query
+      # compiler uses a dynamic import ts-jest's default CJS transform
+      # can't otherwise handle).
+      - name: API integration tests (real Postgres, no browser)
+        run: pnpm --filter api run test:e2e
+
       - name: Install Playwright browsers
         run: pnpm --filter web exec playwright install --with-deps chromium
 

@@ -1,5 +1,143 @@
 # Learning Journal
 
+## M18 — A real API integration test suite (2026-08-05)
+
+### What I built
+
+- A real NestJS integration test suite (`apps/api/test/*.e2e-spec.ts`),
+  closing debt left open since M11: the real `AppModule`, booted
+  against a real Postgres, driven with `supertest`, no browser and no
+  mocked `PrismaService`.
+- Coverage for auth, projects (including an explicit cross-org test),
+  API keys, trace/span ingestion through a real API key end to end,
+  and CSRF (obtained the same way a real browser does).
+- A real, automated, tag-scoped cleanup helper, and a CI wiring change
+  that runs this suite early in the existing `e2e` job.
+
+### What I learned
+
+- Nobody had ever booted a real, connected `PrismaClient` inside this
+  project's own Jest tests before, since every existing test mocked
+  `PrismaService` away. That meant two structural problems (Prisma 7's
+  dynamic-import query compiler, Jest's `globalTeardown` bypassing the
+  configured resolver) had been sitting there, latent, the entire time,
+  simply because nothing had ever exercised that specific combination.
+  Coverage gaps aren't just "things not tested," they can also be
+  "things that would immediately break the moment someone tries them,"
+  and you don't find out which until someone actually does.
+- Jest's `globalSetup`/`globalTeardown` hooks are not just "a test file
+  that runs once at the end." They load through an entirely different
+  mechanism than normal test files, one that bypasses the resolver
+  config (`moduleNameMapper`) everything else depends on. I'd assumed
+  configuration applies uniformly across a tool's own lifecycle hooks;
+  it doesn't, and the failure mode (a plain "cannot find module" with
+  no hint about *why* resolution behaves differently here) gave no
+  clue that this was the actual cause.
+- Prisma 7's `prisma-client` generator outputs raw `.ts`, not compiled
+  `.js` like older Prisma versions. This project's own `moduleNameMapper`
+  (stripping a `.js` suffix so the resolver retries with `.ts`) exists
+  specifically to paper over that, and it recurses: the generated
+  client's own internal imports use the identical pattern, so anything
+  bypassing that one resolver breaks not just at the top level but at
+  every level of the generated client's own import graph.
+- Proving cleanup actually works, and is actually scoped correctly, is
+  a different and stronger claim than "the code looks like it deletes
+  the right things." Querying the real database directly after a run
+  (zero tagged rows, Playwright's own rows untouched) is what actually
+  backs that claim; reading the deletion logic and reasoning that it
+  should be correct is not the same thing.
+
+### Decisions made
+
+- ADR-0021: real `AppModule` over a trimmed test module; shared local/
+  CI Postgres with tagged data over a dedicated test database; cleanup
+  as a per-file `afterAll` calling a plain function, not
+  `globalTeardown`, once the resolver problem was understood; CSRF
+  tokens obtained through the real endpoint, never
+  `computeCsrfToken()` imported directly; `--runInBand` as a
+  deliberate, conservative first-version choice; CI placement decided
+  only after clearing `dist/` output and proving `apps/api` didn't
+  need it, not assumed from reasoning about the dependency graph alone.
+
+### Problems encountered and how we resolved them
+
+- The very first real test run failed with `A dynamic import callback
+  was invoked without --experimental-vm-modules`, coming from deep
+  inside Prisma's own driver-adapter query compiler. Traced to Prisma
+  7's WASM-based query compiler using a dynamic `import()` that ts-jest's
+  default CJS transform can't execute. Fixed by adding
+  `NODE_OPTIONS=--experimental-vm-modules` directly to the `test:e2e`
+  script, verified by rerunning and watching the same test pass clean.
+- The planned `globalTeardown` cleanup script failed immediately with
+  `Cannot find module '.../generated/prisma/client.js'`, despite the
+  exact same import already working correctly inside every normal spec
+  file. Diagnosed by testing the hypothesis directly (a plain Node
+  `require`, then `ts-node`, both reproducing the same failure outside
+  Jest entirely) rather than guessing at a fix: `globalTeardown` loads
+  through a different mechanism that bypasses Jest's own resolver, and
+  the `.js`-suffix-mapping-to-`.ts` trick this project's Prisma setup
+  depends on only exists inside that resolver. Fixed by moving the
+  exact same cleanup logic into a plain, normally-imported function
+  each spec file's own `afterAll` calls using that file's already-
+  connected `PrismaService`, sidestepping the separate-loading-mechanism
+  problem entirely instead of trying to work around it in place.
+- After lint auto-fixed formatting, 33 real `@typescript-eslint/no-unsafe-member-access`
+  errors remained, since `supertest`'s `Response.body` is typed `any`.
+  Fixed by adding a small typed `body<T>()` cast helper and a handful of
+  shared response-shape interfaces, matching this project's own existing
+  pattern of casting once immediately after a call rather than
+  accessing an untyped value repeatedly.
+- Before finalizing CI placement, deliberately reproduced the exact
+  class of bug that had just broken CI at M16 (a workspace package's
+  `dist/` being required before it existed): cleared
+  `packages/sdk`'s and `packages/cli`'s `dist/` and ran `apps/api`'s
+  own tests and typecheck with neither present. Both passed clean,
+  confirming the new step was safe to place early, rather than assuming
+  it from reading the dependency graph alone.
+
+### Interview questions I should be able to answer
+
+- Why did booting a real Prisma client inside Jest surface two
+  completely unrelated structural problems that months of existing
+  tests never hit?
+- Walk through exactly why Jest's `globalTeardown` couldn't resolve an
+  import that every other file in the same test run resolves
+  correctly.
+- Why generate a fresh, tagged user per test instead of a shared fixture
+  or a database reset between tests?
+- What's the actual difference between reasoning that cleanup should be
+  correct and proving that it is, and which one did this milestone
+  rely on?
+- Why run this suite serially for now instead of parallelizing it like
+  the rest of this project's own Jest suites?
+
+### Common mistakes engineers make here
+
+- Assuming a testing framework's configuration (resolvers, module
+  mappers, transforms) applies uniformly across every hook and lifecycle
+  event it exposes, instead of checking whether a specific hook uses a
+  different loading path.
+- Mocking a dependency (like `PrismaService`) so consistently across a
+  test suite that a fundamental integration problem with the real thing
+  never gets the chance to surface until much later.
+- Trusting that cleanup logic is correct because it reads correctly,
+  instead of verifying against the real system it's supposed to clean
+  up.
+- Reasoning about whether a CI step needs a prior build step from the
+  dependency graph alone, instead of actually clearing the relevant
+  output and running it, especially right after that exact class of bug
+  was found elsewhere in the same project.
+
+### How this milestone improves my resume
+
+"Closed integration-test debt left open for seven milestones, and in
+doing so found and fixed two structural problems (a test runner's
+dynamic-import limitation, a lifecycle hook that silently bypasses the
+project's own module resolution config) that had never been triggered
+before because every existing test mocked the real dependency away" is
+a specific, verifiable claim about testing infrastructure and
+debugging discipline, not just "added tests."
+
 ## M17 — Making `agenttrace init` actually work (2026-08-04)
 
 ### What I built
